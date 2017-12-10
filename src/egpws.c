@@ -20,13 +20,18 @@
 
 #include <acfutils/airportdb.h>
 #include <acfutils/assert.h>
+#include <acfutils/math.h>
+#include <acfutils/perf.h>
 #include <acfutils/time.h>
 #include <acfutils/thread.h>
 
 #include "egpws.h"
+#include "snd_sys.h"
 #include "xplane.h"
 
 #define	RUN_INTVAL	SEC2USEC(0.5)
+#define	INF_VS		1e10
+#define	RA_LIMIT	FEET2MET(2500)
 
 static bool_t inited = B_FALSE;
 static bool_t shutdown = B_FALSE;
@@ -40,6 +45,12 @@ static mutex_t data_lock;
 static egpws_pos_t cur_pos;		/* protected by data_lock */
 static egpws_conf_t conf;		/* read-only once inited */
 static bool_t flaps_ovrd = B_FALSE;	/* atomic */
+
+static struct {
+	struct {
+		double last_caut_vs;
+	} mode1;
+} state;
 
 static void
 egpws_boot(void)
@@ -61,7 +72,67 @@ egpws_shutdown(void)
 static void
 mode1(egpws_pos_t pos)
 {
-	UNUSED(pos);
+	static const vect2_t caut_rng_tp[] = {
+		VECT2(0,		FPM2MPS(-1031)),
+		VECT2(FEET2MET(2450),	FPM2MPS(-5007)),
+		VECT2(FEET2MET(2500),	-INF_VS),
+		NULL_VECT2
+	};
+	static const vect2_t warn_rng_tp[] = {
+		VECT2(0,		FPM2MPS(-1500)),
+		VECT2(FEET2MET(346),	FPM2MPS(-1765)),
+		VECT2(FEET2MET(1958),	FPM2MPS(-10000)),
+		VECT2(FEET2MET(2000),	-INF_VS),
+		NULL_VECT2
+	};
+	static const vect2_t caut_rng_jet[] = {
+		VECT2(0,		FPM2MPS(-1031)),
+		VECT2(FEET2MET(2450),	FPM2MPS(-4700)),
+		VECT2(FEET2MET(2500),	-INF_VS),
+		NULL_VECT2
+	};
+	static const vect2_t warn_rng_jet[] = {
+		VECT2(0,		FPM2MPS(-1500)),
+		VECT2(FEET2MET(346),	FPM2MPS(-1765)),
+		VECT2(FEET2MET(2450),	FPM2MPS(-7000)),
+		VECT2(FEET2MET(2500),	-INF_VS),
+		NULL_VECT2
+	};
+	double caut_vs, warn_vs;
+
+	if (isnan(pos.vs) || isnan(pos.ra) || isnan(pos.pos.elev) ||
+	    pos.ra > RA_LIMIT)
+		return;
+
+	if (conf.jet) {
+		caut_vs = fx_lin_multi(pos.ra, caut_rng_jet, B_FALSE);
+		warn_vs = fx_lin_multi(pos.ra, warn_rng_jet, B_FALSE);
+	} else {
+		caut_vs = fx_lin_multi(pos.ra, caut_rng_tp, B_FALSE);
+		warn_vs = fx_lin_multi(pos.ra, warn_rng_tp, B_FALSE);
+	}
+
+	if (pos.vs > warn_vs) {
+		sched_sound(SND_PUP);
+	} else if (pos.vs >= caut_vs) {
+		double next_caut_vs;
+		double caut_vs_20pct = caut_vs * 0.2;
+
+		if (state.mode1.last_caut_vs < caut_vs) {
+			next_caut_vs = caut_vs;
+		} else {
+			next_caut_vs = ceil(pos.vs / caut_vs_20pct) *
+			    caut_vs_20pct;
+		}
+		if (pos.vs >= next_caut_vs &&
+		    next_caut_vs > state.mode1.last_caut_vs) {
+			state.mode1.last_caut_vs = next_caut_vs;
+			sched_sound(SND_SINKRATE);
+		}
+	} else {
+		unsched_sound(SND_SINKRATE);
+		state.mode1.last_caut_vs = 0;
+	}
 }
 
 static void
@@ -109,6 +180,7 @@ egpws_init(egpws_conf_t acf_conf)
 	conf = acf_conf;
 	flaps_ovrd = B_FALSE;
 
+	memset(&state, 0, sizeof (state));
 	memset(&cur_pos, 0, sizeof (cur_pos));
 	cur_pos.pos = NULL_GEO_POS3;
 	mutex_init(&data_lock);

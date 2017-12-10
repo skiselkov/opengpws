@@ -17,7 +17,7 @@ cmake_minimum_required(VERSION 2.8)
 project(opengpws C)
 
 SET(SRC egpws.c snd_sys.c xplane.c)
-SET(HDR egpws.h snd_sys.h xplane.h)
+SET(HDR egpws.h snd_sys.h xplane.h xplane_api.h)
 
 SET(CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELEASE} -DDEBUG -g")
 SET(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -DDEBUG -O0 -g")

@@ -26,8 +26,22 @@ extern "C" {
 #endif
 
 typedef enum {
-	SND_SINKRATE2,
-	SND_PULL_UP,
+	SND_DONT_SINK,		/* Don't sink */
+	SND_GLIDESLOPE,		/* Glideslop */
+	SND_GOAR_WS_AHEAD,	/* Go around, winshear ahead */
+	SND_MON_RAD_DISP,	/* Monitor radar display */
+	SND_OBST_AHEAD,		/* Obstacle ahead */
+	SND_OBST_AHEAD_PUP,	/* Obstacle ahead, pull up */
+	SND_PUP,		/* Pull up */
+	SND_SINKRATE,		/* Sinkrate */
+	SND_TERR2,		/* Terrain, terrain */
+	SND_TERR_AHEAD_PUP,	/* Terrain ahead, pull up */
+	SND_TERR,		/* Terrain */
+	SND_TOOLOW_FLAPS,	/* Too low, flaps */
+	SND_TOOLOW_GEAR,	/* Too low, gear */
+	SND_TOOLOW_TERR,	/* Too low, terrain */
+	SND_WS_AHEAD,		/* Windshear ahead */
+	SND_WS,			/* Windshear */
 	NUM_SOUNDS
 } snd_id_t;
 

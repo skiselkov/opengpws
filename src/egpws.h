@@ -19,22 +19,17 @@
 #ifndef	_EGPWS_H_
 #define	_EGPWS_H_
 
-#include <acfutils/geom.h>
+#include "xplane_api.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef struct {
-	geo_pos3_t	pos;
-	double		trk;
-	double		gs;
-	double		vs;
-} egpws_pos_t;
-
-void egpws_init(void);
+void egpws_init(egpws_acf_desc_t acf_desc);
 void egpws_fini(void);
 void egpws_set_position(egpws_pos_t pos);
+void egpws_set_dest(const char *icao);
+void egpws_set_flaps_ovrd(bool_t flag);
 
 #ifdef __cplusplus
 }

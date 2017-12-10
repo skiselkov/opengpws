@@ -33,8 +33,22 @@ static bool_t inited = B_FALSE;
 static alc_t *alc = NULL;
 static mutex_t lock;
 static snd_t sounds[NUM_SOUNDS] = {
-	{ .filename = "sinkrate2.opus" },
-	{ .filename = "pull_up.opus" }
+	{ .filename = "dont_sink.opus" },
+	{ .filename = "glideslope.opus" },
+	{ .filename = "go_around_windshear_ahead.opus" },
+	{ .filename = "monitor_radar_display.opus" },
+	{ .filename = "obstacle_ahead.opus" },
+	{ .filename = "obstacle_ahead_pull_up.opus" },
+	{ .filename = "pull_up.opus" },
+	{ .filename = "sinkrate.opus" },
+	{ .filename = "terrain2.opus" },
+	{ .filename = "terrain_ahead_pull_up.opus" },
+	{ .filename = "terrain.opus" },
+	{ .filename = "too_low_flaps.opus" },
+	{ .filename = "too_low_gear.opus" },
+	{ .filename = "too_low_terrain.opus" },
+	{ .filename = "windshear_ahead.opus" },
+	{ .filename = "windshear.opus" }
 };
 
 bool_t

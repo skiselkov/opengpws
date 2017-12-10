@@ -38,6 +38,8 @@ static bool_t init_error = B_FALSE;
 
 static mutex_t data_lock;
 static egpws_pos_t cur_pos;
+static egpws_acf_desc_t acf;
+static bool_t flaps_ovrd = B_FALSE;
 
 static void
 egpws_boot(void)
@@ -96,7 +98,7 @@ out:
 }
 
 void
-egpws_init(void)
+egpws_init(egpws_acf_desc_t acf_desc)
 {
 	ASSERT(!inited);
 
@@ -104,6 +106,8 @@ egpws_init(void)
 	shutdown = B_FALSE;
 	mutex_init(&lock);
 	cv_init(&cv);
+	acf = acf_desc;
+	flaps_ovrd = B_FALSE;
 
 	memset(&cur_pos, 0, sizeof (cur_pos));
 	cur_pos.pos = NULL_GEO_POS3;
@@ -135,7 +139,15 @@ egpws_fini(void)
 void
 egpws_set_position(egpws_pos_t pos)
 {
+	ASSERT(inited);
 	mutex_enter(&data_lock);
 	cur_pos = pos;
 	mutex_exit(&data_lock);
+}
+
+void
+egpws_set_flaps_ovrd(bool_t flag)
+{
+	ASSERT(inited);
+	flaps_ovrd = flag;
 }

@@ -25,14 +25,51 @@
 extern "C" {
 #endif
 
+typedef enum {
+	APPR_MIN_NONE,		/* no callout of approaching minimums */
+	APPR_MIN_BOEING,	/* "Approaching minimums" for MDA & DH */
+	APPR_MIN_BOEING_WITH_DH,/* ^^^ + "Approaching decision height" for DH */
+	APPR_MIN_AIRBUS		/* "Hundred above" */
+} appr_min_t;
+
+/*
+ * Optional RA callouts. The '500' callout is mandatory. See ra_500_type_t
+ * for configuration of the 500 foot callout.
+ */
+typedef enum {
+	RA_CALLOUT_2500 =	1 << 0,
+	RA_CALLOUT_1000 =	1 << 1,
+	RA_CALLOUT_400 =	1 << 2,
+	RA_CALLOUT_300 =	1 << 3,
+	RA_CALLOUT_200 =	1 << 4,
+	RA_CALLOUT_100 =	1 << 5,
+	RA_CALLOUT_50 =		1 << 6,
+	RA_CALLOUT_40 =		1 << 7,
+	RA_CALLOUT_30 =		1 << 8,
+	RA_CALLOUT_20 =		1 << 9,
+	RA_CALLOUT_10 =		1 << 10,
+	RA_CALLOUT_5 =		1 << 11
+} ra_call_mask_t;
+
+typedef enum {
+	RA_500_HARD,	/* Call out "FIVE HUNDRED" RA once during appr */
+	RA_500_SMART,	/* Call out "FIVE HUNDRED" on non-precision appr */
+	RA_500_AFE,	/* Call out "FIVE HUNDRED" of closest rwy elev */
+	RA_500_ABV_AFE	/* Call out "FIVE HUNDRED ABOVE" of closest rwy elev */
+} ra_500_type_t;
+
 typedef struct {
 	bool_t		jet;	/* aircraft is a turbojet */
-} egpws_acf_desc_t;
+	appr_min_t	appr_min; /* how to call out approaching minimums */
+	ra_call_mask_t	ra_calls; /* how/if to annunciate RA altitudes */
+	ra_500_type_t	ra_500;	/* how to annunciate "FIVE HUNDRED" */
+} egpws_conf_t;
 
 typedef struct {
 	geo_pos3_t	pos;	/* lat x lon (degrees) x elev (meters) */
 	double		trk;	/* true track, degrees */
 	double		gs;	/* groundspeed, m/s */
+	double		asi;	/* indicated airspeed, m/s */
 	double		vs;	/* vertical speed, m/s */
 	double		ra;	/* radio altitude, meters */
 	bool_t		on_gnd;	/* on-ground gear switch */

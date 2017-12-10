@@ -57,8 +57,11 @@ static bool_t		on_gnd_ok = B_TRUE;	/* ground squat switch OK? */
 
 static dr_t		lat, lon, elev;
 static dr_t		trk;
+static dr_t		asi_kts;
+static dr_t		asi_fail;
 static dr_t		gs;
 static dr_t		vs_ft;
+static dr_t		vs_fail;
 static dr_t		ra_ft;
 static dr_t		on_gnd;
 
@@ -78,13 +81,20 @@ sensor_cb(float elapsed, float elapsed2, int counter, void *refcon)
 			    dr_getf(&elev));
 			pos.trk = dr_getf(&trk);
 			pos.gs = dr_getf(&gs);
-			pos.vs = FEET2MET(dr_getf(&vs_ft));
 		} else {
 			pos.pos = NULL_GEO_POS3;
 			pos.trk = NAN;
 			pos.gs = NAN;
 			pos.vs = NAN;
 		}
+		if (dr_geti(&asi_fail) != 6)
+			pos.asi = KT2MPS(dr_getf(&asi_kts));
+		else
+			pos.asi = NAN;
+		if (dr_geti(&vs_fail) != 6)
+			pos.vs = FEET2MET(dr_getf(&vs_ft));
+		else
+			pos.vs = NAN;
 		if (on_gnd_ok) {
 			int on_ground[3];
 			VERIFY3S(dr_getvi(&on_gnd, on_ground, 0, 3), ==, 3);
@@ -170,8 +180,11 @@ XPluginEnable(void)
 	fdr_find(&lon, "sim/flightmodel/position/longitude");
 	fdr_find(&elev, "sim/flightmodel/position/elevation");
 	fdr_find(&trk, "sim/flightmodel/position/hpath");
+	fdr_find(&asi_kts, "sim/cockpit2/gauges/indicators/airspeed_kts_pilot");
+	fdr_find(&asi_fail, "sim/operation/failures/rel_ss_asi");
 	fdr_find(&gs, "sim/flightmodel/position/groundspeed");
 	fdr_find(&vs_ft, "sim/cockpit2/gauges/indicators/vvi_fpm_pilot");
+	fdr_find(&vs_fail, "sim/operation/failures/rel_ss_vvi");
 	fdr_find(&ra_ft,
 	    "sim/cockpit2/gauges/indicators/radio_altimeter_height_ft_pilot");
 	fdr_find(&on_gnd, "sim/flightmodel2/gear/on_ground");
@@ -198,7 +211,7 @@ XPluginReceiveMessage(XPLMPluginID from, int msg, void *param)
 	switch (msg) {
 	case EGPWS_SET_STATE:
 		if (param != NULL && !booted) {
-			egpws_init(*(egpws_acf_desc_t *)param);
+			egpws_init(*(egpws_conf_t *)param);
 			booted = B_TRUE;
 			pos_ok = B_TRUE;
 			ra_ok = B_TRUE;

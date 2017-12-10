@@ -33,22 +33,37 @@ static bool_t inited = B_FALSE;
 static alc_t *alc = NULL;
 static mutex_t lock;
 static snd_t sounds[NUM_SOUNDS] = {
-	{ .filename = "dont_sink.opus" },
-	{ .filename = "glideslope.opus" },
-	{ .filename = "go_around_windshear_ahead.opus" },
-	{ .filename = "monitor_radar_display.opus" },
-	{ .filename = "obstacle_ahead.opus" },
-	{ .filename = "obstacle_ahead_pull_up.opus" },
-	{ .filename = "pull_up.opus" },
-	{ .filename = "sinkrate.opus" },
-	{ .filename = "terrain2.opus" },
-	{ .filename = "terrain_ahead_pull_up.opus" },
-	{ .filename = "terrain.opus" },
-	{ .filename = "too_low_flaps.opus" },
-	{ .filename = "too_low_gear.opus" },
-	{ .filename = "too_low_terrain.opus" },
-	{ .filename = "windshear_ahead.opus" },
-	{ .filename = "windshear.opus" }
+	{ .filename = "pull_up.opus" },			/* SND_PUP */
+	{ .filename = "terr2.opus" },			/* SND_TERR2 */
+	{ .filename = "terr_ahead_pull_up.opus" },	/* SND_TERR_AHEAD_PUP */
+	{ .filename = "obst_ahead_pull_up.opus" },	/* SND_OBST_AHEAD_PUP */
+	{ .filename = "ws.opus" },			/* SND_WS */
+	{ .filename = "go_around_ws_ahead.opus" },	/* SND_GOAR_WS_AHEAD, */
+	{ .filename = "ws_ahead.opus" },		/* SND_WS_AHEAD */
+	{ .filename = "terr.opus" },			/* SND_TERR */
+	{ .filename = "terr.opus" },			/* SND_MINS */
+	{ .filename = "terr_ahead.opus" },		/* SND_TERR_AHEAD */
+	{ .filename = "obst_ahead.opus" },		/* SND_OBST_AHEAD */
+	{ .filename = "too_low_terr.opus" },		/* SND_TOOLOW_TERR */
+	{ .filename = "terr.opus" },			/* SND_RA_2500 */
+	{ .filename = "terr.opus" },			/* SND_RA_1000 */
+	{ .filename = "terr.opus" },			/* SND_RA_500 */
+	{ .filename = "terr.opus" },			/* SND_RA_400 */
+	{ .filename = "terr.opus" },			/* SND_RA_300 */
+	{ .filename = "terr.opus" },			/* SND_RA_200 */
+	{ .filename = "terr.opus" },			/* SND_RA_100 */
+	{ .filename = "terr.opus" },			/* SND_RA_50 */
+	{ .filename = "terr.opus" },			/* SND_RA_40 */
+	{ .filename = "terr.opus" },			/* SND_RA_30 */
+	{ .filename = "terr.opus" },			/* SND_RA_20 */
+	{ .filename = "terr.opus" },			/* SND_RA_10 */
+	{ .filename = "terr.opus" },			/* SND_RA_5 */
+	{ .filename = "too_low_gear.opus" },		/* SND_TOOLOW_GEAR */
+	{ .filename = "too_low_flaps.opus" },		/* SND_TOOLOW_FLAPS */
+	{ .filename = "sinkrate.opus" },		/* SND_SINKRATE */
+	{ .filename = "dont_sink.opus" },		/* SND_DONT_SINK */
+	{ .filename = "gs.opus" },			/* SND_GLIDESLOPE */
+	{ .filename = "terr.opus" }			/* SND_BANK_ANGLE2 */
 };
 
 bool_t
@@ -104,22 +119,50 @@ snd_sys_fini(void)
 void
 snd_sys_floop_cb(void)
 {
+	bool_t higher_playing = B_FALSE;
+
 	ASSERT(inited);
 
 	mutex_enter(&lock);
-	for (snd_id_t snd = 0; snd < NUM_SOUNDS; snd++) {
-		if (sounds[snd].play)
-			wav_play(sounds[snd].wav);
+	for (snd_id_t snd_id = 0; snd_id < NUM_SOUNDS; snd_id++) {
+		snd_t *snd = &sounds[snd_id];
+
+		/*
+		 * If playback was requested and a higher priority is not yet
+		 * playing, play our message.
+		 */
+		if (snd->play && !higher_playing) {
+			if (!wav_is_playing(snd->wav))
+				wav_play(snd->wav);
+			snd->play = B_FALSE;
+			higher_playing = B_TRUE;
+		} else if (higher_playing && wav_is_playing(snd->wav)) {
+			/* Stop lower priority messages */
+			wav_stop(snd->wav);
+			snd->play = B_FALSE;
+		}
 	}
 	mutex_exit(&lock);
 }
 
 void
-play_sound(snd_id_t snd)
+sched_sound(snd_id_t snd)
 {
 	ASSERT(inited);
+	ASSERT3U(snd, <, NUM_SOUNDS);
 
 	mutex_enter(&lock);
 	sounds[snd].play = B_TRUE;
+	mutex_exit(&lock);
+}
+
+void
+unsched_sound(snd_id_t snd)
+{
+	ASSERT(inited);
+	ASSERT3U(snd, <, NUM_SOUNDS);
+
+	mutex_enter(&lock);
+	sounds[snd].play = B_FALSE;
 	mutex_exit(&lock);
 }

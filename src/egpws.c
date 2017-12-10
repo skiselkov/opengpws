@@ -26,7 +26,7 @@
 #include "egpws.h"
 #include "xplane.h"
 
-#define	RUN_INTVAL	SEC2USEC(1)
+#define	RUN_INTVAL	SEC2USEC(0.5)
 
 static bool_t inited = B_FALSE;
 static bool_t shutdown = B_FALSE;
@@ -37,9 +37,9 @@ static airportdb_t db;
 static bool_t init_error = B_FALSE;
 
 static mutex_t data_lock;
-static egpws_pos_t cur_pos;
-static egpws_acf_desc_t acf;
-static bool_t flaps_ovrd = B_FALSE;
+static egpws_pos_t cur_pos;		/* protected by data_lock */
+static egpws_conf_t conf;		/* read-only once inited */
+static bool_t flaps_ovrd = B_FALSE;	/* atomic */
 
 static void
 egpws_boot(void)
@@ -98,7 +98,7 @@ out:
 }
 
 void
-egpws_init(egpws_acf_desc_t acf_desc)
+egpws_init(egpws_conf_t acf_conf)
 {
 	ASSERT(!inited);
 
@@ -106,7 +106,7 @@ egpws_init(egpws_acf_desc_t acf_desc)
 	shutdown = B_FALSE;
 	mutex_init(&lock);
 	cv_init(&cv);
-	acf = acf_desc;
+	conf = acf_conf;
 	flaps_ovrd = B_FALSE;
 
 	memset(&cur_pos, 0, sizeof (cur_pos));

@@ -66,23 +66,33 @@ typedef struct {
 } egpws_conf_t;
 
 typedef struct {
-	geo_pos3_t	pos;	/* lat x lon (degrees) x elev (meters) */
+	geo_pos3_t	pos;	/* lat x lon (degrees) x true elev (meters) */
 	double		trk;	/* true track, degrees */
 	double		gs;	/* groundspeed, m/s */
 	double		asi;	/* indicated airspeed, m/s */
 	double		vs;	/* vertical speed, m/s */
 	double		ra;	/* radio altitude, meters */
 	bool_t		on_gnd;	/* on-ground gear switch */
+	double		loc_dev;/* localizer deviation, dots, pos right */
+	double		gs_dev;	/* glideslope deviation, dots, pos up */
 } egpws_pos_t;
 
 typedef enum {
-	EGPWS_SET_STATE =	0x100000,	/* egpws_tcf_tesc_t * param */
+	EGPWS_MK_VIII,
+	EGPWS_TAWS_B
+} egpws_syst_type_t;
+
+enum {
+	EGPWS_SET_STATE =	0x100000,	/* bool_t param */
+	EGPWS_SET_SYST_TYPE,			/* egpws_syst_type_t param */
 	EGPWS_SET_FLAPS_OVRD,			/* bool_t param */
 	EGPWS_SET_POS_OK,			/* bool_t param */
 	EGPWS_SET_RA_OK,			/* bool_t param */
 	EGPWS_SET_ON_GND_OK,			/* bool_t param */
-	EGPWS_SET_DEST				/* char * param, ICAO ID */
-} egpws_msg_t;
+	EGPWS_SET_DEST,				/* char * param, ICAO ID */
+	EGPWS_SET_NAV1_ON,			/* bool_t param */
+	EGPWS_SET_NAV2_ON			/* bool_t param */
+};
 
 #ifdef __cplusplus
 }

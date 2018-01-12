@@ -37,6 +37,7 @@
 
 #include "egpws.h"
 #include "snd_sys.h"
+#include "terr.h"
 #include "xplane_api.h"
 
 #define	PLUGIN_NAME		"OpenGPWS by Saso Kiselkov"
@@ -64,52 +65,69 @@ static dr_t		vs_ft;
 static dr_t		vs_fail;
 static dr_t		ra_ft;
 static dr_t		on_gnd;
+static dr_t		loc_fail, gs_fail;
+
+static struct {
+	dr_t	freq;
+	dr_t	type;
+	dr_t	id;
+	dr_t	hdef;
+	dr_t	vdef;
+	dr_t	gs_flag;
+	bool_t	on;
+} nav1, nav2;
 
 static float
 sensor_cb(float elapsed, float elapsed2, int counter, void *refcon)
 {
+	egpws_pos_t pos;
+	geo_pos2_t terr_pos;
+
 	UNUSED(elapsed);
 	UNUSED(elapsed2);
 	UNUSED(counter);
 	UNUSED(refcon);
 
-	if (booted) {
-		egpws_pos_t pos;
+	if (!booted)
+		return (SENSOR_INTVAL);
 
-		if (pos_ok) {
-			pos.pos = GEO_POS3(dr_getf(&lat), dr_getf(&lon),
-			    dr_getf(&elev));
-			pos.trk = dr_getf(&trk);
-			pos.gs = dr_getf(&gs);
-		} else {
-			pos.pos = NULL_GEO_POS3;
-			pos.trk = NAN;
-			pos.gs = NAN;
-			pos.vs = NAN;
-		}
-		if (dr_geti(&asi_fail) != 6)
-			pos.asi = KT2MPS(dr_getf(&asi_kts));
-		else
-			pos.asi = NAN;
-		if (dr_geti(&vs_fail) != 6)
-			pos.vs = FEET2MET(dr_getf(&vs_ft));
-		else
-			pos.vs = NAN;
-		if (on_gnd_ok) {
-			int on_ground[3];
-			VERIFY3S(dr_getvi(&on_gnd, on_ground, 0, 3), ==, 3);
-			pos.on_gnd = B_FALSE;
-			for (int i = 0; i < 3; i++)
-				pos.on_gnd |= on_ground[i];
-		} else {
-			pos.on_gnd = B_FALSE;
-		}
-		if (ra_ok)
-			pos.ra = FEET2MET(dr_getf(&ra_ft));
-		else
-			pos.ra = NAN;
-		egpws_set_position(pos);
+	if (pos_ok) {
+		pos.pos = GEO_POS3(dr_getf(&lat), dr_getf(&lon),
+		    dr_getf(&elev));
+		pos.trk = dr_getf(&trk);
+		pos.gs = dr_getf(&gs);
+		terr_pos = GEO_POS2(pos.pos.lat, pos.pos.lon);
+	} else {
+		pos.pos = NULL_GEO_POS3;
+		pos.trk = NAN;
+		pos.gs = NAN;
+		pos.vs = NAN;
+		terr_pos = NULL_GEO_POS2;
 	}
+	if (dr_geti(&asi_fail) != 6)
+		pos.asi = KT2MPS(dr_getf(&asi_kts));
+	else
+		pos.asi = NAN;
+	if (dr_geti(&vs_fail) != 6)
+		pos.vs = FEET2MET(dr_getf(&vs_ft));
+	else
+		pos.vs = NAN;
+	if (on_gnd_ok) {
+		int on_ground[3];
+		VERIFY3S(dr_getvi(&on_gnd, on_ground, 0, 3), ==, 3);
+		pos.on_gnd = B_FALSE;
+		for (int i = 0; i < 3; i++)
+			pos.on_gnd |= on_ground[i];
+	} else {
+		pos.on_gnd = B_FALSE;
+	}
+	if (ra_ok)
+		pos.ra = FEET2MET(dr_getf(&ra_ft));
+	else
+		pos.ra = NAN;
+
+	egpws_set_position(pos);
+	terr_set_pos(terr_pos);
 
 	return (SENSOR_INTVAL);
 }
@@ -189,6 +207,25 @@ XPluginEnable(void)
 	    "sim/cockpit2/gauges/indicators/radio_altimeter_height_ft_pilot");
 	fdr_find(&on_gnd, "sim/flightmodel2/gear/on_ground");
 
+	fdr_find(&loc_fail, "sim/operation/failures/rel_loc");
+	fdr_find(&gs_fail, "sim/operation/failures/rel_gls");
+
+	fdr_find(&nav1.freq, "sim/cockpit/radios/nav1_freq_hz");
+	fdr_find(&nav1.type, "sim/cockpit2/radios/indicators/nav1_type");
+	fdr_find(&nav1.id, "sim/cockpit2/radios/indicators/nav1_nav_id");
+	fdr_find(&nav1.hdef, "sim/cockpit/radios/nav1_hdef_dot");
+	fdr_find(&nav1.vdef, "sim/cockpit/radios/nav1_vdef_dot");
+	fdr_find(&nav1.gs_flag,
+	    "sim/cockpit2/radios/indicators/hsi_flag_glideslope_pilot");
+
+	fdr_find(&nav2.freq, "sim/cockpit/radios/nav2_freq_hz");
+	fdr_find(&nav2.type, "sim/cockpit2/radios/indicators/nav2_type");
+	fdr_find(&nav2.id, "sim/cockpit2/radios/indicators/nav2_nav_id");
+	fdr_find(&nav2.hdef, "sim/cockpit/radios/nav2_hdef_dot");
+	fdr_find(&nav2.vdef, "sim/cockpit/radios/nav2_vdef_dot");
+	fdr_find(&nav1.gs_flag,
+	    "sim/cockpit2/radios/indicators/hsi_flag_glideslope_copilot");
+
 	XPLMRegisterFlightLoopCallback(sensor_cb, SENSOR_INTVAL, NULL);
 
 	return (1);
@@ -200,6 +237,7 @@ XPluginDisable(void)
 	XPLMUnregisterFlightLoopCallback(sensor_cb, NULL);
 
 	egpws_fini();
+	terr_fini();
 	snd_sys_fini();
 }
 
@@ -211,6 +249,7 @@ XPluginReceiveMessage(XPLMPluginID from, int msg, void *param)
 	switch (msg) {
 	case EGPWS_SET_STATE:
 		if (param != NULL && !booted) {
+			terr_init(xpdir);
 			egpws_init(*(egpws_conf_t *)param);
 			booted = B_TRUE;
 			pos_ok = B_TRUE;
@@ -218,9 +257,17 @@ XPluginReceiveMessage(XPLMPluginID from, int msg, void *param)
 			on_gnd_ok = B_TRUE;
 		} else if (param == NULL && booted) {
 			egpws_fini();
+			terr_fini();
 			booted = B_FALSE;
 		}
 		break;
+	case EGPWS_SET_SYST_TYPE: {
+		egpws_syst_type_t type = (uintptr_t)param;
+		VERIFY3U(type, <=, EGPWS_TAWS_B);
+		VERIFY(booted);
+		egpws_set_syst_type(type);
+		break;
+	}
 	case EGPWS_SET_FLAPS_OVRD:
 		if (booted)
 			egpws_set_flaps_ovrd((uintptr_t)param);
@@ -237,6 +284,12 @@ XPluginReceiveMessage(XPLMPluginID from, int msg, void *param)
 	case EGPWS_SET_DEST:
 		if (booted)
 			egpws_set_dest(param);
+		break;
+	case EGPWS_SET_NAV1_ON:
+		nav1.on = (uintptr_t)param;
+		break;
+	case EGPWS_SET_NAV2_ON:
+		nav2.on = (uintptr_t)param;
 		break;
 	}
 }

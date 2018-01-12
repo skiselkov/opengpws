@@ -16,24 +16,24 @@
  * Copyright 2017 Saso Kiselkov. All rights reserved.
  */
 
-#ifndef	_EGPWS_H_
-#define	_EGPWS_H_
+#ifndef	_OPENGPWS_TERR_H_
+#define	_OPENGPWS_TERR_H_
 
-#include "xplane_api.h"
+#include <acfutils/geom.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-void egpws_init(egpws_conf_t acf_conf);
-void egpws_fini(void);
-void egpws_set_syst_type(egpws_syst_type_t type);
-void egpws_set_position(egpws_pos_t pos);
-void egpws_set_dest(const char *icao);
-void egpws_set_flaps_ovrd(bool_t flag);
+void terr_init(const char *xpdir);
+void terr_fini(void);
+
+void terr_set_pos(geo_pos2_t pos);
+void terr_set_range(double rng, double res);
+double terr_get_elev(geo_pos2_t pos);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif	/* _EGPWS_H_ */
+#endif	/* _OPENGPWS_TERR_H_ */

@@ -27,6 +27,7 @@
 
 #include "egpws.h"
 #include "snd_sys.h"
+#include "terr.h"
 #include "xplane.h"
 
 #define	RUN_INTVAL	SEC2USEC(0.5)
@@ -40,6 +41,7 @@ static condvar_t cv;
 static thread_t worker;
 static airportdb_t db;
 static bool_t init_error = B_FALSE;
+static egpws_syst_type_t syst_type = EGPWS_MK_VIII;
 
 static mutex_t data_lock;
 static egpws_pos_t cur_pos;		/* protected by data_lock */
@@ -48,8 +50,16 @@ static bool_t flaps_ovrd = B_FALSE;	/* atomic */
 
 static struct {
 	struct {
-		double last_caut_vs;
-	} mode1;
+		struct {
+			double last_caut_vs;
+		} mode1;
+	} mk8;
+	struct {
+		struct {
+			bool_t lo_caut;
+			bool_t hi_caut;
+		} edr;
+	} tawsb;
 } state;
 
 static void
@@ -70,7 +80,7 @@ egpws_shutdown(void)
 }
 
 static void
-mode1(egpws_pos_t pos)
+mk8_mode1(egpws_pos_t pos)
 {
 	static const vect2_t caut_rng_tp[] = {
 		VECT2(0,		FPM2MPS(-1031)),
@@ -118,21 +128,79 @@ mode1(egpws_pos_t pos)
 		double next_caut_vs;
 		double caut_vs_20pct = caut_vs * 0.2;
 
-		if (state.mode1.last_caut_vs < caut_vs) {
+		if (state.mk8.mode1.last_caut_vs < caut_vs) {
 			next_caut_vs = caut_vs;
 		} else {
 			next_caut_vs = ceil(pos.vs / caut_vs_20pct) *
 			    caut_vs_20pct;
 		}
 		if (pos.vs >= next_caut_vs &&
-		    next_caut_vs > state.mode1.last_caut_vs) {
-			state.mode1.last_caut_vs = next_caut_vs;
+		    next_caut_vs > state.mk8.mode1.last_caut_vs) {
+			state.mk8.mode1.last_caut_vs = next_caut_vs;
 			sched_sound(SND_SINKRATE);
 		}
 	} else {
 		unsched_sound(SND_SINKRATE);
-		state.mode1.last_caut_vs = 0;
+		state.mk8.mode1.last_caut_vs = 0;
 	}
+}
+
+static void
+tawsb_edr(egpws_pos_t pos)
+{
+	static const vect2_t caut_rng[] = {
+		VECT2(0,		FPM2MPS(-1300)),
+		VECT2(FEET2MET(1500),	FPM2MPS(-2350)),
+		VECT2(FEET2MET(3100),	FPM2MPS(-4850)),
+		VECT2(FEET2MET(5500),	FPM2MPS(-12000)),
+		NULL_VECT2
+	};
+	static const vect2_t warn_rng[] = {
+		VECT2(0,		FPM2MPS(-1300)),
+		VECT2(FEET2MET(1150),	FPM2MPS(-2350)),
+		VECT2(FEET2MET(2450),	FPM2MPS(-4850)),
+		VECT2(FEET2MET(4400),	FPM2MPS(-12000)),
+		NULL_VECT2
+	};
+	static const double max_hgt = FEET2MET(5500);
+	double terr_elev, hgt, caut_vs, warn_vs;
+
+	if (IS_NULL_GEO_POS(pos.pos) || isnan(pos.vs))
+		goto errout;
+	terr_elev = terr_get_elev(GEO_POS2(pos.pos.lat, pos.pos.lon));
+	if (isnan(terr_elev))
+		goto errout;
+	hgt = MAX(pos.pos.elev - terr_elev, 0);
+	if (hgt > max_hgt)
+		goto errout;
+
+	caut_vs = fx_lin_multi(hgt, caut_rng, B_FALSE);
+	warn_vs = fx_lin_multi(hgt, warn_rng, B_FALSE);
+
+	if (pos.vs >= warn_vs) {
+		state.tawsb.edr.lo_caut = B_TRUE;
+		state.tawsb.edr.hi_caut = B_TRUE;
+		sched_sound(SND_PUP);
+	} else if (pos.vs >= caut_vs) {
+		if (!state.tawsb.edr.lo_caut) {
+			state.tawsb.edr.lo_caut = B_TRUE;
+			sched_sound(SND_SINKRATE);
+		} else if (!state.tawsb.edr.hi_caut &&
+		    pos.vs > (caut_vs + warn_vs) / 2) {
+			state.tawsb.edr.hi_caut = B_TRUE;
+			sched_sound(SND_SINKRATE);
+		}
+	} else {
+		state.tawsb.edr.lo_caut = B_FALSE;
+		state.tawsb.edr.hi_caut = B_FALSE;
+		unsched_sound(SND_PUP);
+		unsched_sound(SND_SINKRATE);
+	}
+
+errout:
+	state.tawsb.edr.hi_caut = B_FALSE;
+	state.tawsb.edr.lo_caut = B_FALSE;
+	return;
 }
 
 static void
@@ -156,7 +224,11 @@ main_loop(void)
 		pos = cur_pos;
 		mutex_exit(&data_lock);
 
-		mode1(pos);
+		if (syst_type == EGPWS_MK_VIII) {
+			mk8_mode1(pos);
+		} else {
+			tawsb_edr(pos);
+		}
 
 		mutex_enter(&lock);
 out:
@@ -206,6 +278,12 @@ egpws_fini(void)
 	cv_destroy(&cv);
 
 	inited = B_FALSE;
+}
+
+void
+egpws_set_syst_type(egpws_syst_type_t type)
+{
+	syst_type = type;
 }
 
 void

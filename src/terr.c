@@ -39,7 +39,7 @@
 #define	EARTH_CIRC		(2 * EARTH_MSL * M_PI)	/* meters */
 #define	TILE_HEIGHT		(EARTH_CIRC / 360.0)	/* meters */
 #define	MAX_LAT			80			/* degrees */
-#define	MIN_RES			100000			/* meters */
+#define	MIN_RES			108000			/* meters */
 #define	MAX_RES			108			/* meters */
 #define	MIN_RNG			5000			/* meters */
 #define	DFL_RNG			50000			/* meters */
@@ -74,8 +74,6 @@ static char *dsf_paths[180][360];
 static char *xpdir = NULL;
 
 static geo_pos2_t pos = NULL_GEO_POS2;
-static double range = DFL_RNG;		/* meters */
-static double resolution = MAX_RES;	/* meters per pixel */
 
 static bool_t load_worker_shutdown = B_TRUE;
 static mutex_t load_worker_lock;
@@ -84,6 +82,12 @@ static thread_t load_worker_thread;
 
 static mutex_t tile_cache_lock;
 static avl_tree_t tile_cache;
+
+static const egpws_range_t dfl_ranges[] = {
+	{ DFL_RNG, MAX_RES },
+	{ NAN, NAN }
+};
+static const egpws_range_t *ranges = dfl_ranges;
 
 static int
 tile_compar(const void *a, const void *b)
@@ -193,28 +197,63 @@ load_tile(int lat, int lon, double load_res)
 	}
 }
 
+static double
+select_tile_res(int tile_lat, int tile_lon)
+{
+	int lat = floor(pos.lat);
+	int lon = floor(pos.lon);
+	vect3_t tile_ecef, my_ecef;
+	double dist;
+	const egpws_range_t *rngs = ranges;
+
+	/*
+	 * Tiles within 1 degree of our position are always loaded at
+	 * maximum resolution to. The terrain avoidance algorithm needs
+	 * this precision. The remaining tiles are for display only, so
+	 * a lower resolution is safe to use.
+	 */
+	if (ABS(tile_lat - lat) <= 1 && ABS(tile_lon - lon) <= 1)
+		return (MAX_RES);
+
+	tile_ecef = geo2ecef(GEO_POS3(tile_lat + 0.5, tile_lon + 0.5, 0),
+	    &wgs84);
+	my_ecef = geo2ecef(GEO_POS3(pos.lat, pos.lon, 0), &wgs84);
+	dist = vect3_abs(vect3_sub(tile_ecef, my_ecef));
+	for (int i = 0; !isnan(rngs[i].range); i++) {
+		if (dist < rngs[i].range)
+			return (rngs[i].resolution);
+	}
+
+	return (MAX_RES);
+}
+
 static void
 load_nrst_tiles(void)
 {
 	int tile_width;
 	int h_tiles, v_tiles;
+	const egpws_range_t *rngs = ranges;
+	double rng = MIN_RNG;
+
+	for (int i = 0; !isnan(rngs[i].range); i++)
+		rng = MAX(rng, rngs[i].range);
 
 	ASSERT3F(ABS(pos.lat), <=, MAX_LAT);
 	tile_width = EARTH_CIRC * cos(DEG2RAD(pos.lat));
-	h_tiles = MAX(range / tile_width, 1);
-	v_tiles = MAX(range / TILE_HEIGHT, 1);
+	h_tiles = MAX(rng / tile_width, 1);
+	v_tiles = MAX(rng / TILE_HEIGHT, 1);
 
 	for (int v = -v_tiles; v <= v_tiles; v++) {
 		for (int h = -h_tiles; h <= h_tiles; h++) {
 			double res;
+			int tile_lat = floor(pos.lat + v);
+			int tile_lon = floor(pos.lon + h);
 
 			if (load_worker_shutdown)
 				return;
-			if (v >= -1 && v <= 1 && h >= -1 && h <= 1)
-				res = MAX_RES;
-			else
-				res = resolution;
-			load_tile(floor(pos.lat + v), floor(pos.lon + h), res);
+
+			res = select_tile_res(tile_lat, tile_lon);
+			load_tile(tile_lat, tile_lon, res);
 		}
 	}
 }
@@ -404,10 +443,12 @@ terr_set_pos(geo_pos2_t new_pos)
 }
 
 void
-terr_set_range(double rng, double res)
+terr_set_ranges(const egpws_range_t *new_ranges)
 {
-	range = clamp(rng, MIN_RNG, MAX_RNG);
-	resolution = clamp(res, MAX_RES, MIN_RES);
+	if (new_ranges != NULL)
+		ranges = new_ranges;
+	else
+		ranges = dfl_ranges;
 }
 
 double

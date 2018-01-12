@@ -38,11 +38,11 @@
 #include "egpws.h"
 #include "snd_sys.h"
 #include "terr.h"
-#include "xplane_api.h"
+#include <opengpws/xplane_api.h>
 
 #define	PLUGIN_NAME		"OpenGPWS by Saso Kiselkov"
-#define	PLUGIN_SIG		"skiselkov.opengpws"
-#define	PLUGIN_DESCRIPTION	"An open-source Mk.VIII EGPWS simulation"
+#define	PLUGIN_DESCRIPTION \
+	"An open-source Mk.VIII EGPWS & TAWS-B simulation"
 
 #define	SENSOR_INTVAL		0.2	/* seconds */
 
@@ -175,7 +175,7 @@ XPluginStart(char *name, char *sig, char *desc)
 	}
 
 	strcpy(name, PLUGIN_NAME);
-	strcpy(sig, PLUGIN_SIG);
+	strcpy(sig, OPENGPWS_PLUGIN_SIG);
 	strcpy(desc, PLUGIN_DESCRIPTION);
 
 	XPLMGetVersions(&xp_ver, &xplm_ver, &host_id);
@@ -261,13 +261,6 @@ XPluginReceiveMessage(XPLMPluginID from, int msg, void *param)
 			booted = B_FALSE;
 		}
 		break;
-	case EGPWS_SET_SYST_TYPE: {
-		egpws_syst_type_t type = (uintptr_t)param;
-		VERIFY3U(type, <=, EGPWS_TAWS_B);
-		VERIFY(booted);
-		egpws_set_syst_type(type);
-		break;
-	}
 	case EGPWS_SET_FLAPS_OVRD:
 		if (booted)
 			egpws_set_flaps_ovrd((uintptr_t)param);
@@ -290,6 +283,10 @@ XPluginReceiveMessage(XPLMPluginID from, int msg, void *param)
 		break;
 	case EGPWS_SET_NAV2_ON:
 		nav2.on = (uintptr_t)param;
+		break;
+	case EGPWS_SET_RANGES:
+		VERIFY(booted);
+		terr_set_ranges(param);
 		break;
 	}
 }

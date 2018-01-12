@@ -17,7 +17,7 @@ cmake_minimum_required(VERSION 2.8)
 project(opengpws C)
 
 SET(SRC egpws.c snd_sys.c terr.c xplane.c)
-SET(HDR egpws.h snd_sys.h terr.h xplane.h xplane_api.h)
+SET(HDR egpws.h snd_sys.h terr.h xplane.h ../opengpws/xplane_api.h)
 
 SET(CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELEASE} -DDEBUG -g")
 SET(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -DDEBUG -O0 -g")
@@ -31,7 +31,8 @@ else()
 	add_library(opengpws SHARED ${ALL_SRC})
 endif()
 
-include_directories(opengpws PUBLIC "${LIBACFUTILS}/src" "${LIBACFUTILS}/glew")
+include_directories(opengpws PUBLIC
+    "${LIBACFUTILS}/src" "${LIBACFUTILS}/glew" "..")
 
 #compiler flags
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Werror --std=c99 \
@@ -97,7 +98,8 @@ if(APPLE)
 	    ${LIBACFUTILS}/cairo/pixman-mac-64/lib
 	    ${LIBACFUTILS}/cairo/cairo-mac-64/lib
 	    ${LIBACFUTILS}/zlib/zlib-mac-64/lib
-	    ${LIBACFUTILS}/libpng/libpng-mac-64/lib)
+	    ${LIBACFUTILS}/libpng/libpng-mac-64/lib
+	    ${LIBACFUTILS}/lzma/qmake/mac-64)
 	FIND_LIBRARY(XPLM_LIBRARY XPLM)
 	FIND_LIBRARY(XPWIDGETS_LIBRARY XPWidgets)
 	FIND_LIBRARY(OPENGL_LIBRARY OpenGL)
@@ -109,6 +111,7 @@ if(APPLE)
 	FIND_LIBRARY(FREETYPE_LIBRARY freetype)
 	FIND_LIBRARY(PIXMAN_LIBRARY pixman-1)
 	FIND_LIBRARY(CAIRO_LIBRARY cairo)
+	FIND_LIBRARY(LZMA_LIBRARY lzma)
 	FIND_LIBRARY(LIBPNG_LIBRARY png16)
 	FIND_LIBRARY(ZLIB_LIBRARY z)
 	target_link_libraries(opengpws
@@ -124,6 +127,7 @@ if(APPLE)
 	    ${PIXMAN_LIBRARY}
 	    ${FREETYPE_LIBRARY}
 	    ${LIBPNG_LIBRARY}
+	    ${LZMA_LIBRARY}
 	    ${ZLIB_LIBRARY}
 	    )
 else()
@@ -136,7 +140,8 @@ else()
 	    ${LIBACFUTILS}/cairo/pixman-linux-64/lib
 	    ${LIBACFUTILS}/cairo/cairo-linux-64/lib
 	    ${LIBACFUTILS}/zlib/zlib-linux-64/lib
-	    ${LIBACFUTILS}/libpng/libpng-linux-64/lib)
+	    ${LIBACFUTILS}/libpng/libpng-linux-64/lib
+	    ${LIBACFUTILS}/lzma/qmake/linux-64)
 	FIND_LIBRARY(LIBACFUTILS_LIBRARY acfutils)
 	FIND_LIBRARY(OPUSFILE_LIBRARY opusfile)
 	FIND_LIBRARY(OPUS_LIBRARY opus)
@@ -146,6 +151,7 @@ else()
 	FIND_LIBRARY(CAIRO_LIBRARY cairo)
 	FIND_LIBRARY(LIBPNG_LIBRARY png16)
 	FIND_LIBRARY(ZLIB_LIBRARY z)
+	FIND_LIBRARY(LZMA_LIBRARY lzma)
 	FIND_LIBRARY(PTHREAD_NONSHARED pthread_nonshared)
 	FIND_LIBRARY(LIBC_NONSHARED c_nonshared)
 	target_link_libraries(opengpws
@@ -160,6 +166,7 @@ else()
 	    ${ZLIB_LIBRARY}
 	    ${PTHREAD_NONSHARED}
 	    ${LIBC_NONSHARED}
+	    ${LZMA_LIBRARY}
 	    )
 endif()
 

@@ -41,7 +41,7 @@ static condvar_t cv;
 static thread_t worker;
 static airportdb_t db;
 static bool_t init_error = B_FALSE;
-static egpws_syst_type_t syst_type = EGPWS_MK_VIII;
+static char dest_icao[8];
 
 static mutex_t data_lock;
 static egpws_pos_t cur_pos;		/* protected by data_lock */
@@ -224,7 +224,7 @@ main_loop(void)
 		pos = cur_pos;
 		mutex_exit(&data_lock);
 
-		if (syst_type == EGPWS_MK_VIII) {
+		if (conf.type == EGPWS_MK_VIII) {
 			mk8_mode1(pos);
 		} else {
 			tawsb_edr(pos);
@@ -281,12 +281,6 @@ egpws_fini(void)
 }
 
 void
-egpws_set_syst_type(egpws_syst_type_t type)
-{
-	syst_type = type;
-}
-
-void
 egpws_set_position(egpws_pos_t pos)
 {
 	ASSERT(inited);
@@ -300,4 +294,10 @@ egpws_set_flaps_ovrd(bool_t flag)
 {
 	ASSERT(inited);
 	flaps_ovrd = flag;
+}
+
+void
+egpws_set_dest(const char *icao)
+{
+	strlcpy(dest_icao, icao, sizeof (dest_icao));
 }

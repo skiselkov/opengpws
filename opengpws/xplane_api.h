@@ -25,6 +25,8 @@
 extern "C" {
 #endif
 
+#define	OPENGPWS_PLUGIN_SIG	"skiselkov.opengpws"
+
 typedef enum {
 	APPR_MIN_NONE,		/* no callout of approaching minimums */
 	APPR_MIN_BOEING,	/* "Approaching minimums" for MDA & DH */
@@ -58,11 +60,17 @@ typedef enum {
 	RA_500_ABV_AFE	/* Call out "FIVE HUNDRED ABOVE" of closest rwy elev */
 } ra_500_type_t;
 
+typedef enum {
+	EGPWS_MK_VIII,
+	EGPWS_TAWS_B
+} egpws_syst_type_t;
+
 typedef struct {
 	bool_t		jet;	/* aircraft is a turbojet */
 	appr_min_t	appr_min; /* how to call out approaching minimums */
 	ra_call_mask_t	ra_calls; /* how/if to annunciate RA altitudes */
 	ra_500_type_t	ra_500;	/* how to annunciate "FIVE HUNDRED" */
+	egpws_syst_type_t type;	/* system type */
 } egpws_conf_t;
 
 typedef struct {
@@ -77,21 +85,21 @@ typedef struct {
 	double		gs_dev;	/* glideslope deviation, dots, pos up */
 } egpws_pos_t;
 
-typedef enum {
-	EGPWS_MK_VIII,
-	EGPWS_TAWS_B
-} egpws_syst_type_t;
+typedef struct {
+	double	range;		/* range in meters */
+	double	resolution;	/* resolution in meters per pixel */
+} egpws_range_t;
 
 enum {
 	EGPWS_SET_STATE =	0x100000,	/* bool_t param */
-	EGPWS_SET_SYST_TYPE,			/* egpws_syst_type_t param */
 	EGPWS_SET_FLAPS_OVRD,			/* bool_t param */
 	EGPWS_SET_POS_OK,			/* bool_t param */
 	EGPWS_SET_RA_OK,			/* bool_t param */
 	EGPWS_SET_ON_GND_OK,			/* bool_t param */
 	EGPWS_SET_DEST,				/* char * param, ICAO ID */
 	EGPWS_SET_NAV1_ON,			/* bool_t param */
-	EGPWS_SET_NAV2_ON			/* bool_t param */
+	EGPWS_SET_NAV2_ON,			/* bool_t param */
+	EGPWS_SET_RANGES			/* egpws_range_t ptr param */
 };
 
 #ifdef __cplusplus

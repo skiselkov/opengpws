@@ -20,6 +20,7 @@
 #define	_OPENGPWS_TERR_H_
 
 #include <acfutils/geom.h>
+#include <opengpws/xplane_api.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,7 +30,7 @@ void terr_init(const char *xpdir);
 void terr_fini(void);
 
 void terr_set_pos(geo_pos2_t pos);
-void terr_set_range(double rng, double res);
+void terr_set_ranges(const egpws_range_t *new_rngs);
 double terr_get_elev(geo_pos2_t pos);
 
 #ifdef __cplusplus

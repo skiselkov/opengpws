@@ -19,7 +19,7 @@
 #ifndef	_EGPWS_H_
 #define	_EGPWS_H_
 
-#include "xplane_api.h"
+#include <opengpws/xplane_api.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,7 +27,6 @@ extern "C" {
 
 void egpws_init(egpws_conf_t acf_conf);
 void egpws_fini(void);
-void egpws_set_syst_type(egpws_syst_type_t type);
 void egpws_set_position(egpws_pos_t pos);
 void egpws_set_dest(const char *icao);
 void egpws_set_flaps_ovrd(bool_t flag);

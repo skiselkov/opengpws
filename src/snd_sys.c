@@ -17,6 +17,7 @@
  */
 
 #include <acfutils/assert.h>
+#include <acfutils/dr.h>
 #include <acfutils/wav.h>
 #include <acfutils/thread.h>
 
@@ -25,6 +26,8 @@
 
 typedef struct {
 	const char	*filename;
+	double		base_gain;
+	double		gain;
 	wav_t		*wav;
 	bool_t		play;
 } snd_t;
@@ -33,38 +36,74 @@ static bool_t inited = B_FALSE;
 static alc_t *alc = NULL;
 static mutex_t lock;
 static snd_t sounds[NUM_SOUNDS] = {
-	{ .filename = "pull_up.opus" },			/* SND_PUP */
-	{ .filename = "terr2.opus" },			/* SND_TERR2 */
-	{ .filename = "terr_ahead_pull_up.opus" },	/* SND_TERR_AHEAD_PUP */
-	{ .filename = "obst_ahead_pull_up.opus" },	/* SND_OBST_AHEAD_PUP */
-	{ .filename = "ws.opus" },			/* SND_WS */
-	{ .filename = "go_around_ws_ahead.opus" },	/* SND_GOAR_WS_AHEAD, */
-	{ .filename = "ws_ahead.opus" },		/* SND_WS_AHEAD */
-	{ .filename = "terr.opus" },			/* SND_TERR */
-	{ .filename = "terr.opus" },			/* SND_MINS */
-	{ .filename = "terr_ahead.opus" },		/* SND_TERR_AHEAD */
-	{ .filename = "obst_ahead.opus" },		/* SND_OBST_AHEAD */
-	{ .filename = "too_low_terr.opus" },		/* SND_TOOLOW_TERR */
-	{ .filename = "terr.opus" },			/* SND_RA_2500 */
-	{ .filename = "terr.opus" },			/* SND_RA_1000 */
-	{ .filename = "terr.opus" },			/* SND_RA_500 */
-	{ .filename = "terr.opus" },			/* SND_RA_400 */
-	{ .filename = "terr.opus" },			/* SND_RA_300 */
-	{ .filename = "terr.opus" },			/* SND_RA_200 */
-	{ .filename = "terr.opus" },			/* SND_RA_100 */
-	{ .filename = "terr.opus" },			/* SND_RA_50 */
-	{ .filename = "terr.opus" },			/* SND_RA_40 */
-	{ .filename = "terr.opus" },			/* SND_RA_30 */
-	{ .filename = "terr.opus" },			/* SND_RA_20 */
-	{ .filename = "terr.opus" },			/* SND_RA_10 */
-	{ .filename = "terr.opus" },			/* SND_RA_5 */
-	{ .filename = "too_low_gear.opus" },		/* SND_TOOLOW_GEAR */
-	{ .filename = "too_low_flaps.opus" },		/* SND_TOOLOW_FLAPS */
-	{ .filename = "sinkrate.opus" },		/* SND_SINKRATE */
-	{ .filename = "dont_sink.opus" },		/* SND_DONT_SINK */
-	{ .filename = "gs.opus" },			/* SND_GLIDESLOPE */
-	{ .filename = "terr.opus" }			/* SND_BANK_ANGLE2 */
+	/* SND_PUP */
+	{ .filename = "pull_up.opus", .base_gain = 1.0 },
+	/* SND_TERR2 */
+	{ .filename = "terr2.opus", .base_gain = 1.0 },
+	/* SND_TERR_AHEAD_PUP */
+	{ .filename = "terr_ahead_pull_up.opus", .base_gain = 1.0 },
+	/* SND_OBST_AHEAD_PUP */
+	{ .filename = "obst_ahead_pull_up.opus", .base_gain = 1.0 },
+	/* SND_WS */
+	{ .filename = "ws.opus", .base_gain = 1.0 },
+	/* SND_GOAR_WS_AHEAD, */
+	{ .filename = "go_around_ws_ahead.opus", .base_gain = 1.0 },
+	/* SND_WS_AHEAD */
+	{ .filename = "ws_ahead.opus", .base_gain = 1.0 },
+	/* SND_TERR */
+	{ .filename = "terr.opus", .base_gain = 1.0 },
+	/* SND_MINS */
+	{ .filename = "terr.opus", .base_gain = 1.0 },
+	/* SND_TERR_AHEAD */
+	{ .filename = "terr_ahead.opus", .base_gain = 1.0 },
+	/* SND_OBST_AHEAD */
+	{ .filename = "obst_ahead.opus", .base_gain = 1.0 },
+	/* SND_TOO_LOW_TERR */
+	{ .filename = "too_low_terr.opus", .base_gain = 1.0 },
+	/* SND_RA_10_BOEING */
+	{ .filename = "ra/boeing/10.opus", .base_gain = 0.3 },
+	/* SND_RA_20_BOEING */
+	{ .filename = "ra/boeing/20.opus", .base_gain = 0.3 },
+	/* SND_RA_30_BOEING */
+	{ .filename = "ra/boeing/30.opus", .base_gain = 0.3 },
+	/* SND_RA_40_BOEING */
+	{ .filename = "ra/boeing/40.opus", .base_gain = 0.3 },
+	/* SND_RA_50_BOEING */
+	{ .filename = "ra/boeing/50.opus", .base_gain = 0.3 },
+	/* SND_RA_100_BOEING */
+	{ .filename = "ra/boeing/100.opus", .base_gain = 0.3 },
+	/* SND_RA_200_BOEING */
+	{ .filename = "ra/boeing/200.opus", .base_gain = 0.3 },
+	/* SND_RA_300_BOEING */
+	{ .filename = "ra/boeing/300.opus", .base_gain = 0.3 },
+	/* SND_RA_400_BOEING */
+	{ .filename = "ra/boeing/400.opus", .base_gain = 0.3 },
+	/* SND_RA_500_BOEING */
+	{ .filename = "ra/boeing/500.opus", .base_gain = 0.3 },
+	/* SND_RA_1000_BOEING */
+	{ .filename = "ra/boeing/100.opus", .base_gain = 0.3 },
+	/* SND_RA_2500_BOEING */
+	{ .filename = "ra/boeing/2500.opus", .base_gain = 0.3 },
+	/* SND_TOO_LOW_GEAR */
+	{ .filename = "too_low_gear.opus", .base_gain = 1.0 },
+	/* SND_TOO_LOW_FLAPS */
+	{ .filename = "too_low_flaps.opus", .base_gain = 1.0 },
+	/* SND_SINKRATE */
+	{ .filename = "sinkrate.opus", .base_gain = 1.0 },
+	/* SND_DONT_SINK */
+	{ .filename = "dont_sink.opus", .base_gain = 1.0 },
+	/* SND_GLIDESLOPE */
+	{ .filename = "gs.opus", .base_gain = 1.0 },
+	/* SND_BANK_ANGLE2 */
+	{ .filename = "terr.opus", .base_gain = 1.0 }
 };
+
+struct {
+	dr_t	view_is_ext;
+	dr_t	sound_is_on;
+	dr_t	int_volume;
+	dr_t	warn_volume;
+} drs;
 
 bool_t
 snd_sys_init(void)
@@ -94,6 +133,11 @@ snd_sys_init(void)
 		}
 	}
 
+	fdr_find(&drs.view_is_ext, "sim/graphics/view/view_is_external");
+	fdr_find(&drs.sound_is_on, "sim/operation/sound/sound_on");
+	fdr_find(&drs.int_volume, "sim/operation/sound/interior_volume_ratio");
+	fdr_find(&drs.warn_volume, "sim/operation/sound/warning_volume_ratio");
+
 	return (B_TRUE);
 }
 
@@ -120,8 +164,14 @@ void
 snd_sys_floop_cb(void)
 {
 	bool_t higher_playing = B_FALSE;
+	double gain;
 
 	ASSERT(inited);
+
+	if (dr_geti(&drs.view_is_ext) != 0 || dr_geti(&drs.sound_is_on) == 0)
+		gain = 0;
+	else
+		gain = dr_getf(&drs.int_volume) * dr_getf(&drs.warn_volume);
 
 	mutex_enter(&lock);
 	for (snd_id_t snd_id = 0; snd_id < NUM_SOUNDS; snd_id++) {
@@ -140,6 +190,11 @@ snd_sys_floop_cb(void)
 			/* Stop lower priority messages */
 			wav_stop(snd->wav);
 			snd->play = B_FALSE;
+		}
+
+		if (snd->gain != gain * snd->base_gain) {
+			wav_set_gain(snd->wav, gain * snd->base_gain);
+			snd->gain = gain * snd->base_gain;
 		}
 	}
 	mutex_exit(&lock);

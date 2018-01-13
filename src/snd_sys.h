@@ -37,22 +37,21 @@ typedef enum {
 	SND_MINS,		/* Minimums, minimums */
 	SND_TERR_AHEAD,		/* Terrain ahead */
 	SND_OBST_AHEAD,		/* Obstacle ahead */
-	SND_TOOLOW_TERR,	/* Too low, terrain */
-	SND_RA_5,		/* 5 ft RA */
-	SND_RA_10,		/* 10 ft RA */
-	SND_RA_20,		/* 20 ft RA */
-	SND_RA_30,		/* 30 ft RA */
-	SND_RA_40,		/* 40 ft RA */
-	SND_RA_50,		/* 50 ft RA */
-	SND_RA_100,		/* 100 ft RA */
-	SND_RA_200,		/* 200 ft RA */
-	SND_RA_300,		/* 300 ft RA */
-	SND_RA_400,		/* 400 ft RA */
-	SND_RA_500,		/* 500 ft RA or 500 ft AFE (conf option) */
-	SND_RA_1000,		/* 1000 ft RA */
-	SND_RA_2500,		/* 2500 ft RA */
-	SND_TOOLOW_GEAR,	/* Too low, gear */
-	SND_TOOLOW_FLAPS,	/* Too low, flaps */
+	SND_TOO_LOW_TERR,	/* Too low, terrain */
+	SND_RA_10_BOEING,	/* 10 ft RA */
+	SND_RA_20_BOEING,	/* 20 ft RA */
+	SND_RA_30_BOEING,	/* 30 ft RA */
+	SND_RA_40_BOEING,	/* 40 ft RA */
+	SND_RA_50_BOEING,	/* 50 ft RA */
+	SND_RA_100_BOEING,	/* 100 ft RA */
+	SND_RA_200_BOEING,	/* 200 ft RA */
+	SND_RA_300_BOEING,	/* 300 ft RA */
+	SND_RA_400_BOEING,	/* 400 ft RA */
+	SND_RA_500_BOEING,	/* 500 ft RA */
+	SND_RA_1000_BOEING,	/* 1000 ft RA */
+	SND_RA_2500_BOEING,	/* 2500 ft RA */
+	SND_TOO_LOW_GEAR,	/* Too low, gear */
+	SND_TOO_LOW_FLAPS,	/* Too low, flaps */
 	SND_SINKRATE,		/* Sinkrate */
 	SND_DONT_SINK,		/* Don't sink */
 	SND_GS,			/* Glideslope */

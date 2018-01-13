@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <XPLMDisplay.h>
 #include <XPLMPlugin.h>
 #include <XPLMProcessing.h>
 #include <XPLMUtilities.h>
@@ -78,17 +79,16 @@ static struct {
 	bool_t	on;
 } nav1, nav2;
 
-static float
-sound_cb(float elapsed, float elapsed2, int counter, void *refcon)
+static int
+sound_cb(XPLMDrawingPhase phase, int before, void *refcon)
 {
-	UNUSED(elapsed);
-	UNUSED(elapsed2);
-	UNUSED(counter);
+	UNUSED(phase);
+	UNUSED(before);
 	UNUSED(refcon);
 
 	snd_sys_floop_cb();
 
-	return (-1);
+	return (1);
 }
 
 static float
@@ -264,7 +264,7 @@ XPluginEnable(void)
 	    "sim/cockpit2/radios/indicators/hsi_flag_glideslope_copilot");
 
 	XPLMRegisterFlightLoopCallback(sensor_cb, SENSOR_INTVAL, NULL);
-	XPLMRegisterFlightLoopCallback(sound_cb, -1, NULL);
+	XPLMRegisterDrawCallback(sound_cb, xplm_Phase_FirstScene, 1, NULL);
 
 	return (1);
 }
@@ -273,7 +273,7 @@ PLUGIN_API void
 XPluginDisable(void)
 {
 	XPLMUnregisterFlightLoopCallback(sensor_cb, NULL);
-	XPLMUnregisterFlightLoopCallback(sound_cb, NULL);
+	XPLMUnregisterDrawCallback(sound_cb, xplm_Phase_FirstScene, 1, NULL);
 
 	egpws_fini();
 	terr_fini();
@@ -314,6 +314,7 @@ XPluginReceiveMessage(XPLMPluginID from, int msg, void *param)
 		on_gnd_ok = (uintptr_t)param;
 		break;
 	case EGPWS_SET_DEST:
+		VERIFY(param != NULL);
 		if (booted)
 			egpws_set_dest(param);
 		break;

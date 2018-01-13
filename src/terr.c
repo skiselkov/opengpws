@@ -365,47 +365,6 @@ free_tile(dem_tile_t *tile)
 }
 
 static void
-load_worker(void *unused)
-{
-	UNUSED(unused);
-
-	mutex_enter(&load_worker_lock);
-	while (!load_worker_shutdown) {
-		dbg_log(tile, 4, "loop");
-
-		/*
-		 * Mark all tiles as dirty. The load process will undirty
-		 * the ones we want to keep.
-		 */
-		for (dem_tile_t *tile = avl_first(&tile_cache); tile != NULL;
-		    tile = AVL_NEXT(&tile_cache, tile)) {
-			tile->dirty = B_TRUE;
-		}
-
-		if (!IS_NULL_GEO_POS(pos))
-			load_nrst_tiles();
-
-		/* Unload dirty tiles */
-		mutex_enter(&tile_cache_lock);
-		for (dem_tile_t *tile = avl_first(&tile_cache), *next = NULL;
-		    tile != NULL; tile = next) {
-			next = AVL_NEXT(&tile_cache, tile);
-			if (tile->dirty) {
-				avl_remove(&tile_cache, tile);
-				free_tile(tile);
-			}
-		}
-		mutex_exit(&tile_cache_lock);
-
-		cv_timedwait(&load_worker_cv, &load_worker_lock,
-		    microclock() + SEC2USEC(LOAD_WORKER_INTVAL));
-	}
-	mutex_exit(&load_worker_lock);
-
-	dbg_log(tile, 4, "load worker shutdown");
-}
-
-static void
 append_cust_srch_paths(void)
 {
 	char *contents;
@@ -472,6 +431,50 @@ errout:
 	free(path);
 }
 
+static void
+load_worker(void *unused)
+{
+	UNUSED(unused);
+
+	append_cust_srch_paths();
+	append_glob_srch_paths();
+
+	mutex_enter(&load_worker_lock);
+	while (!load_worker_shutdown) {
+		dbg_log(tile, 4, "loop");
+
+		/*
+		 * Mark all tiles as dirty. The load process will undirty
+		 * the ones we want to keep.
+		 */
+		for (dem_tile_t *tile = avl_first(&tile_cache); tile != NULL;
+		    tile = AVL_NEXT(&tile_cache, tile)) {
+			tile->dirty = B_TRUE;
+		}
+
+		if (!IS_NULL_GEO_POS(pos))
+			load_nrst_tiles();
+
+		/* Unload dirty tiles */
+		mutex_enter(&tile_cache_lock);
+		for (dem_tile_t *tile = avl_first(&tile_cache), *next = NULL;
+		    tile != NULL; tile = next) {
+			next = AVL_NEXT(&tile_cache, tile);
+			if (tile->dirty) {
+				avl_remove(&tile_cache, tile);
+				free_tile(tile);
+			}
+		}
+		mutex_exit(&tile_cache_lock);
+
+		cv_timedwait(&load_worker_cv, &load_worker_lock,
+		    microclock() + SEC2USEC(LOAD_WORKER_INTVAL));
+	}
+	mutex_exit(&load_worker_lock);
+
+	dbg_log(tile, 4, "load worker shutdown");
+}
+
 void
 terr_init(const char *the_xpdir)
 {
@@ -488,8 +491,6 @@ terr_init(const char *the_xpdir)
 
 	list_create(&srch_paths, sizeof (srch_path_t),
 	    offsetof(srch_path_t, node));
-	append_cust_srch_paths();
-	append_glob_srch_paths();
 
 	load_worker_shutdown = B_FALSE;
 	mutex_init(&load_worker_lock);

@@ -28,7 +28,7 @@ extern "C" {
 void egpws_init(egpws_conf_t acf_conf);
 void egpws_fini(void);
 void egpws_set_position(egpws_pos_t pos);
-void egpws_set_dest(const char *icao);
+void egpws_set_dest(const egpws_arpt_ref_t *ref);
 void egpws_set_flaps_ovrd(bool_t flag);
 
 #ifdef __cplusplus

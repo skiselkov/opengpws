@@ -90,13 +90,18 @@ typedef struct {
 	double	resolution;	/* resolution in meters per pixel */
 } egpws_range_t;
 
+typedef struct {
+	char		icao[8];	/* airport ICAO code */
+	geo_pos3_t	pos;		/* airport geographic position */
+} egpws_arpt_ref_t;
+
 enum {
 	EGPWS_SET_STATE =	0x100000,	/* bool_t param */
 	EGPWS_SET_FLAPS_OVRD,			/* bool_t param */
 	EGPWS_SET_POS_OK,			/* bool_t param */
 	EGPWS_SET_RA_OK,			/* bool_t param */
 	EGPWS_SET_ON_GND_OK,			/* bool_t param */
-	EGPWS_SET_DEST,				/* char * param, ICAO ID */
+	EGPWS_SET_DEST,				/* arpt_ref_t * param */
 	EGPWS_SET_NAV1_ON,			/* bool_t param */
 	EGPWS_SET_NAV2_ON,			/* bool_t param */
 	EGPWS_SET_RANGES			/* egpws_range_t ptr param */

@@ -35,6 +35,7 @@
 #include <acfutils/time.h>
 #include <acfutils/thread.h>
 
+#include "dbg_log.h"
 #include "egpws.h"
 #include "snd_sys.h"
 #include "terr.h"
@@ -78,6 +79,19 @@ static struct {
 } nav1, nav2;
 
 static float
+sound_cb(float elapsed, float elapsed2, int counter, void *refcon)
+{
+	UNUSED(elapsed);
+	UNUSED(elapsed2);
+	UNUSED(counter);
+	UNUSED(refcon);
+
+	snd_sys_floop_cb();
+
+	return (-1);
+}
+
+static float
 sensor_cb(float elapsed, float elapsed2, int counter, void *refcon)
 {
 	egpws_pos_t pos;
@@ -109,7 +123,7 @@ sensor_cb(float elapsed, float elapsed2, int counter, void *refcon)
 	else
 		pos.asi = NAN;
 	if (dr_geti(&vs_fail) != 6)
-		pos.vs = FEET2MET(dr_getf(&vs_ft));
+		pos.vs = FPM2MPS(dr_getf(&vs_ft));
 	else
 		pos.vs = NAN;
 	if (on_gnd_ok) {
@@ -136,6 +150,8 @@ PLUGIN_API int
 XPluginStart(char *name, char *sig, char *desc)
 {
 	char *p;
+	char *confpath;
+	conf_t *conf = NULL;
 
 	log_init(XPLMDebugString, "OpenGPWS");
 	crc64_init();
@@ -179,6 +195,27 @@ XPluginStart(char *name, char *sig, char *desc)
 	strcpy(desc, PLUGIN_DESCRIPTION);
 
 	XPLMGetVersions(&xp_ver, &xplm_ver, &host_id);
+
+	confpath = mkpathname(xpdir, plugindir, "OpenGPWS.cfg", NULL);
+	if (file_exists(confpath, NULL)) {
+		int errline;
+
+		conf = conf_read_file(confpath, &errline);
+		if (conf == NULL) {
+			if (errline < 0) {
+				logMsg("Error reading configuration %s: cannot "
+				    "open configuration file.", confpath);
+			} else {
+				logMsg("Error reading configuration %s: syntax "
+				    "error on line %d.", confpath, errline);
+			}
+		}
+	}
+	if (conf == NULL)
+		conf = conf_create_empty();
+	dbg_log_init(conf);
+	conf_free(conf);
+	free(confpath);
 
 	return (1);
 }
@@ -227,6 +264,7 @@ XPluginEnable(void)
 	    "sim/cockpit2/radios/indicators/hsi_flag_glideslope_copilot");
 
 	XPLMRegisterFlightLoopCallback(sensor_cb, SENSOR_INTVAL, NULL);
+	XPLMRegisterFlightLoopCallback(sound_cb, -1, NULL);
 
 	return (1);
 }
@@ -235,6 +273,7 @@ PLUGIN_API void
 XPluginDisable(void)
 {
 	XPLMUnregisterFlightLoopCallback(sensor_cb, NULL);
+	XPLMUnregisterFlightLoopCallback(sound_cb, NULL);
 
 	egpws_fini();
 	terr_fini();

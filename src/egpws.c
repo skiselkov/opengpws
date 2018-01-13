@@ -25,6 +25,7 @@
 #include <acfutils/time.h>
 #include <acfutils/thread.h>
 
+#include "dbg_log.h"
 #include "egpws.h"
 #include "snd_sys.h"
 #include "terr.h"
@@ -176,21 +177,27 @@ tawsb_edr(egpws_pos_t pos)
 
 	caut_vs = fx_lin_multi(hgt, caut_rng, B_FALSE);
 	warn_vs = fx_lin_multi(hgt, warn_rng, B_FALSE);
+	dbg_log(egpws, 2, "edr| caut: %.1f  warn: %.1f  vs: %.1f", caut_vs,
+	    warn_vs, pos.vs);
 
-	if (pos.vs >= warn_vs) {
+	if (pos.vs <= warn_vs) {
+		dbg_log(egpws, 2, "edr| pull up");
 		state.tawsb.edr.lo_caut = B_TRUE;
 		state.tawsb.edr.hi_caut = B_TRUE;
 		sched_sound(SND_PUP);
-	} else if (pos.vs >= caut_vs) {
+	} else if (pos.vs <= caut_vs) {
 		if (!state.tawsb.edr.lo_caut) {
+			dbg_log(egpws, 2, "edr| lo_caut");
 			state.tawsb.edr.lo_caut = B_TRUE;
 			sched_sound(SND_SINKRATE);
 		} else if (!state.tawsb.edr.hi_caut &&
-		    pos.vs > (caut_vs + warn_vs) / 2) {
+		    pos.vs < (caut_vs + warn_vs) / 2) {
+			dbg_log(egpws, 2, "edr| hi_caut");
 			state.tawsb.edr.hi_caut = B_TRUE;
 			sched_sound(SND_SINKRATE);
 		}
 	} else {
+		dbg_log(egpws, 3, "edr| clear");
 		state.tawsb.edr.lo_caut = B_FALSE;
 		state.tawsb.edr.hi_caut = B_FALSE;
 		unsched_sound(SND_PUP);
@@ -223,7 +230,6 @@ main_loop(void)
 		mutex_enter(&data_lock);
 		pos = cur_pos;
 		mutex_exit(&data_lock);
-
 		if (conf.type == EGPWS_MK_VIII) {
 			mk8_mode1(pos);
 		} else {
@@ -252,17 +258,24 @@ egpws_init(egpws_conf_t acf_conf)
 	conf = acf_conf;
 	flaps_ovrd = B_FALSE;
 
+	dbg_log(egpws, 3, "type: %s",
+	    conf.type == EGPWS_MK_VIII ? "Mk8" : "TAWS-B");
+
 	memset(&state, 0, sizeof (state));
 	memset(&cur_pos, 0, sizeof (cur_pos));
 	cur_pos.pos = NULL_GEO_POS3;
 	mutex_init(&data_lock);
 
 	VERIFY(thread_create(&worker, (int(*)(void *))main_loop, NULL));
+
+	dbg_log(egpws, 1, "init");
 }
 
 void
 egpws_fini(void)
 {
+	dbg_log(egpws, 1, "fini");
+
 	if (!inited)
 		return;
 
@@ -286,6 +299,8 @@ egpws_set_position(egpws_pos_t pos)
 	ASSERT(inited);
 	mutex_enter(&data_lock);
 	cur_pos = pos;
+	dbg_log(cfg, 1, "set pos %.4f x %.4f x %.0f",
+	    pos.pos.lat, pos.pos.lon, pos.pos.elev);
 	mutex_exit(&data_lock);
 }
 
@@ -293,11 +308,15 @@ void
 egpws_set_flaps_ovrd(bool_t flag)
 {
 	ASSERT(inited);
+	if (flaps_ovrd != flag)
+		dbg_log(cfg, 1, "set flaps ovrd %d", flag);
 	flaps_ovrd = flag;
 }
 
 void
 egpws_set_dest(const char *icao)
 {
+	if (strcmp(icao, dest_icao) != 0)
+		dbg_log(cfg, 1, "set dest \"%s\"", icao);
 	strlcpy(dest_icao, icao, sizeof (dest_icao));
 }

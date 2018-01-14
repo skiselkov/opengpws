@@ -32,10 +32,16 @@
 #include "xplane.h"
 #include <opengpws/xplane_api.h>
 
-#define	RUN_INTVAL		SEC2USEC(0.5)
-#define	INF_VS			1e10
+#define	RUN_INTVAL		0.5		/* seconds */
+#define	INF_VS			1e10		/* m/s */
 #define	RA_LIMIT		FEET2MET(2500)
 #define	TAWSB_ARPT_500_DIST_LIM	NM2MET(5)
+#define	MAX_NCR_HDG_CHG		110		/* degrees */
+#define	MAX_NCR_HGT		FEET2MET(700)
+#define	MAX_NCR_DIST		NM2MET(5)
+#define	NCR_SUPRESS_CLB_RATE	FPM2MPS(300)
+#define	D_TRK_UPD_RATE		2		/* seconds */
+#define	ARPT_LOAD_LIMIT		NM2MET(23)
 
 static bool_t		inited = B_FALSE;
 static bool_t		shutdown = B_FALSE;
@@ -52,6 +58,8 @@ static struct {
 	egpws_arpt_ref_t	dest;		/* protected by lock */
 	egpws_pos_t		pos;		/* protected by lock */
 	bool_t			flaps_ovrd;	/* atomic */
+	double			d_trk;		/* rate of change of trk */
+	double			last_pos_update; /* time (in seconds) */
 } glob_data;
 
 static struct {
@@ -66,6 +74,19 @@ static struct {
 			bool_t hi_caut;
 		} edr;
 		bool_t ann_500ft;
+		struct {
+			bool_t		active;
+			geo_pos3_t	liftoff_pt;	/* lift-off point */
+			double		liftoff_hdg;
+			double		max_hgt;
+			double		prev_hgt;
+			double		max_alt;
+			double		prev_alt;
+		} ncr;
+		struct {
+			bool_t		ahead_played;
+			double		last_caut_time;
+		} rtc;
 	} tawsb;
 } state;
 
@@ -76,6 +97,7 @@ egpws_boot(void)
 	char *cachedir = mkpathname(plugindir, "airport.cache", NULL);
 
 	airportdb_create(&db, get_xpdir(), cachedir);
+	set_airport_load_limit(&db, ARPT_LOAD_LIMIT);
 	init_error = !recreate_cache(&db);
 	free(cachedir);
 }
@@ -219,51 +241,233 @@ errout:
 	return;
 }
 
-static double
-tawsb_dest_dist(const egpws_pos_t *pos, const egpws_arpt_ref_t *dest)
+static void
+tawsb_db_arpt_dist(const egpws_pos_t *pos, airport_t *arpt,
+    double *arpt_dist_p, double *arpt_hgt_p)
 {
-	vect3_t my_ecef, dest_ecef;
-	vect2_t my_pos_2d;
-	airport_t *arpt;
-	double dist;
+	vect3_t my_ecef = geo2ecef(pos->pos, &wgs84);
+	vect3_t dest_ecef = geo2ecef(arpt->refpt, &wgs84);
+	double dist = vect3_abs(vect3_sub(dest_ecef, my_ecef));
+	double elev = arpt->refpt.elev;
+	vect2_t my_pos_2d = geo2fpp(GEO3_TO_GEO2(pos->pos), &arpt->fpp);
 
-	if (dest->icao[0] == '\0' || IS_NULL_GEO_POS(pos->pos)) {
-		/* No destination set, return infinity */
-		dbg_log(egpws, 2, "dest_dist| inf");
-		return (1e10);
-	}
-	ASSERT(!IS_NULL_GEO_POS(dest->pos));
-
-	my_ecef = geo2ecef(pos->pos, &wgs84);
-	dest_ecef = geo2ecef(dest->pos, &wgs84);
-	dist = vect3_abs(vect3_sub(dest_ecef, my_ecef));
-
-	/* Check if we are closer to a runway threshold. */
-	arpt = airport_lookup(&db, dest->icao, GEO3_TO_GEO2(pos->pos));
-	if (arpt == NULL)
-		return (dist);
-
-	my_pos_2d = geo2fpp(GEO3_TO_GEO2(pos->pos), &arpt->fpp);
 	for (runway_t *rwy = avl_first(&arpt->rwys); rwy != NULL;
 	    rwy = AVL_NEXT(&arpt->rwys, rwy)) {
 		/* When we're over a runway, we'll declare zero distance. */
-		if (point_in_poly(my_pos_2d, rwy->rwy_bbox))
-			return (0);
+		if (point_in_poly(my_pos_2d, rwy->rwy_bbox)) {
+			*arpt_dist_p = 0;
+			/* Assume the runway elev is the mean of its ends */
+			*arpt_hgt_p = pos->pos.elev - ((rwy->ends[0].thr.elev +
+			    rwy->ends[1].thr.elev) / 2);
+			return;
+		}
 
 		for (int i = 0; i < 2; i++) {
 			vect3_t p = geo2ecef(rwy->ends[i].thr, &wgs84);
 			double d = vect3_abs(vect3_sub(p, my_ecef));
-			dist = MIN(d, dist);
+			if (d < dist) {
+				dist = d;
+				elev = rwy->ends[i].thr.elev;
+			}
 		}
 	}
 
-	dbg_log(egpws, 2, "dest_dist| %.0f", dist);
-
-	return (dist);
+	*arpt_dist_p = dist;
+	*arpt_hgt_p = pos->pos.elev - elev;
 }
 
-//static void
-//tawsb_rtc_iti(const egpws_pos_t *pos, const egpws_arpt_ref_t *dest)
+static bool_t
+tawsb_nearest_arpt_or_rwy(const egpws_pos_t *pos, double *arpt_dist_p,
+    double *arpt_hgt_p)
+{
+	list_t *arpts = find_nearest_airports(&db, GEO3_TO_GEO2(pos->pos));
+	double dist = NAN, hgt = NAN;
+
+	for (airport_t *arpt = list_head(arpts); arpt != NULL;
+	    arpt = list_next(arpts, arpt)) {
+		double arpt_dist, arpt_hgt;
+		tawsb_db_arpt_dist(pos, arpt, &arpt_dist, &arpt_hgt);
+		if (isnan(dist) || arpt_dist < dist) {
+			dist = arpt_dist;
+			hgt = arpt_hgt;
+		}
+	}
+
+	free_nearest_airport_list(arpts);
+
+	if (!isnan(dist) && !isnan(hgt)) {
+		*arpt_dist_p = dist;
+		*arpt_hgt_p = hgt;
+		return (B_TRUE);
+	} else {
+		return (B_FALSE);
+	}
+}
+
+static void
+tawsb_dest_dist(const egpws_pos_t *pos, const egpws_arpt_ref_t *dest,
+    double *dest_dist_p, double *dest_hgt_p)
+{
+	airport_t *arpt;
+
+	if (dest->icao[0] == '\0' || IS_NULL_GEO_POS(pos->pos)) {
+		/* No destination set, return infinity */
+		dbg_log(egpws, 2, "dest_dist| inf");
+		*dest_dist_p = 1e10;
+		*dest_hgt_p = 1e10;
+		return;
+	}
+	ASSERT(!IS_NULL_GEO_POS(dest->pos));
+
+	/* Check if we are closer to a runway threshold. */
+	arpt = airport_lookup(&db, dest->icao, GEO3_TO_GEO2(pos->pos));
+	if (arpt == NULL) {
+		/* Use the externally-provided info */
+		*dest_dist_p = vect3_abs(vect3_sub(geo2ecef(pos->pos, &wgs84),
+		    geo2ecef(dest->pos, &wgs84)));
+		*dest_hgt_p = pos->pos.elev - dest->pos.elev;
+		return;
+	}
+
+	tawsb_db_arpt_dist(pos, arpt, dest_dist_p, dest_hgt_p);
+
+	dbg_log(egpws, 2, "dest| dist:%.0f  hgt:%.0f", *dest_dist_p,
+	    *dest_hgt_p);
+}
+
+static void
+tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
+{
+#define	RTC_SIM_STEP		RUN_INTVAL
+#define	RTC_NUM_STEPS_MAX	(45 / RTC_SIM_STEP)	/* simulate 35s */
+#define	RTC_NUM_STEPS_MIN	(30 / RTC_SIM_STEP)	/* simulate 20s */
+#define	RTC_WARN_STEP_FRACT	0.8
+#define	RTC_MAX_D_TRK_RATE	3			/* deg/s */
+#define	RTC_DES_THRESH		FPM2MPS(-300)
+#define	RTC_INH_DIST_THRESH	NM2MET(0.5)
+#define	RTC_INH_HGT_THRESH	FEET2MET(200)
+#define	RTC_CAUT_INTVAL		5			/* seconds */
+#define	RTC_RISING_TERR_THRESH	FEET2MET(150)
+
+	static const vect2_t lvl_curve[] = {
+		VECT2(0,		0),
+		VECT2(NM2MET(0.5),	0),
+		VECT2(NM2MET(2),	FEET2MET(175)),
+		VECT2(NM2MET(23),	FEET2MET(700)),
+		VECT2(1e11,		FEET2MET(700)),
+		NULL_VECT2
+	};
+	static const vect2_t des_curve[] = {
+		VECT2(0,		0),
+		VECT2(NM2MET(0.5),	0),
+		VECT2(NM2MET(2),	FEET2MET(120)),
+		VECT2(NM2MET(17.5),	FEET2MET(500)),
+		VECT2(1e11,		FEET2MET(500)),
+		NULL_VECT2
+	};
+	static const vect2_t coll_curve[] = {
+		VECT2(NM2MET(0.5),	FEET2MET(50)),
+		VECT2(NM2MET(5),	FEET2MET(100)),
+		VECT2(1e11,		FEET2MET(100)),
+		NULL_VECT2
+	};
+	double rqd_clr, coll_clr, trk, arpt_dist, arpt_hgt;
+	fpp_t fpp;
+	vect2_t p;
+	double cur_hgt = NAN;
+	int num_sim_steps = wavg(RTC_NUM_STEPS_MAX, RTC_NUM_STEPS_MIN,
+	    iter_fract(ABS(d_trk), 0, RTC_MAX_D_TRK_RATE, B_TRUE));
+	double hgt_samples[num_sim_steps];
+	bool_t caut_found = B_FALSE, warn_found = B_FALSE;
+	double min_hgt = 1e10;
+
+	if (pos->on_gnd)
+		return;
+
+	if (!tawsb_nearest_arpt_or_rwy(pos, &arpt_dist, &arpt_hgt)) {
+		arpt_dist = 1e10;
+		arpt_hgt = 1e10;
+	}
+
+	/* Inihibit within 0.5 NM and less than 200 ft above destination */
+	if (arpt_dist < RTC_INH_DIST_THRESH && arpt_hgt < RTC_INH_HGT_THRESH)
+		return;
+
+	if (pos->vs > RTC_DES_THRESH)
+		rqd_clr = fx_lin_multi(arpt_dist, lvl_curve, B_FALSE);
+	else
+		rqd_clr = fx_lin_multi(arpt_dist, des_curve, B_FALSE);
+	coll_clr = fx_lin_multi(arpt_dist, coll_curve, B_FALSE);
+	ASSERT(!isnan(rqd_clr));
+	ASSERT(!isnan(coll_clr));
+
+	trk = pos->trk;
+	p = ZERO_VECT2;
+	fpp = ortho_fpp_init(GEO3_TO_GEO2(pos->pos), 0, &wgs84, B_TRUE);
+
+	for (int i = 0; i < num_sim_steps; i++) {
+		geo_pos2_t gp = fpp2geo(p, &fpp);
+		double terr_elev = terr_get_elev_wide(gp);
+		vect2_t vel;
+
+		ASSERT(!IS_NULL_GEO_POS(gp));
+
+		if (isnan(terr_elev))
+			terr_elev = 0;
+		hgt_samples[i] = pos->pos.elev - terr_elev;
+		if (i == 0)
+			cur_hgt = hgt_samples[i];
+
+		/* Integrate our position variables */
+		trk += d_trk * RTC_SIM_STEP;
+		vel = vect2_scmul(hdg2dir(trk), pos->gs * RTC_SIM_STEP);
+		p = vect2_add(p, vel);
+	}
+	ASSERT(!isnan(cur_hgt));
+
+	for (int i = 0; i < num_sim_steps; i++) {
+		if (i < num_sim_steps * RTC_WARN_STEP_FRACT &&
+		    hgt_samples[i] < coll_clr) {
+			min_hgt = hgt_samples[i];
+			warn_found = B_TRUE;
+			break;
+		}
+		if (hgt_samples[i] < rqd_clr) {
+			min_hgt = MIN(min_hgt, hgt_samples[i]);
+			caut_found = B_TRUE;
+		}
+	}
+
+	if (warn_found) {
+		dbg_log(rtc, 1, "rtc| min_hgt:%.0f  rqd:%.0f  coll:%.0f = "
+		    "PULL UP", min_hgt, rqd_clr, coll_clr);
+		if (!state.tawsb.rtc.ahead_played) {
+			sched_sound(SND_TERR_AHEAD_PUP);
+			state.tawsb.rtc.ahead_played = B_TRUE;
+		}
+		sched_sound(SND_PUP);
+	} else if (caut_found) {
+		snd_id_t snd;
+		double now = USEC2SEC(microclock());
+		dbg_log(rtc, 1, "rtc| min_hgt:%.0f  rqd:%.0f  coll:%.0f = "
+		    "TERR AHEAD", min_hgt, rqd_clr, coll_clr);
+
+		if (cur_hgt - min_hgt < RTC_RISING_TERR_THRESH)
+			snd = SND_TOO_LOW_TERR;
+		else
+			snd = SND_TERR_AHEAD;
+
+		if (now - state.tawsb.rtc.last_caut_time > RTC_CAUT_INTVAL) {
+			sched_sound(snd);
+			state.tawsb.rtc.last_caut_time = now;
+		}
+		state.tawsb.rtc.ahead_played = B_FALSE;
+	} else {
+		dbg_log(rtc, 1, "rtc| rqd: %.0f  coll:%.0f = OK", rqd_clr,
+		    coll_clr);
+		state.tawsb.rtc.ahead_played = B_FALSE;
+	}
+}
 
 /*
  * Premature Descent Alerting
@@ -303,6 +507,16 @@ tawsb_pda(const egpws_pos_t *pos, const egpws_arpt_ref_t *dest,
 		sched_sound(SND_TOO_LOW_TERR);
 }
 
+/*
+ * 500 ft callout
+ *
+ * Aircraft has descended to 500 ft or lower height a certain platform
+ * altitude. The altitude of that platform is either:
+ *
+ * 1) If <= 5 NM from an airport, the threshold elevation of the
+ *	nearest runway threshold, OR
+ * 2) If > 5 NM from an airport, based on terrain DB elevation.
+ */
 static void
 tawsb_500(const egpws_pos_t *pos)
 {
@@ -363,13 +577,110 @@ tawsb_500(const egpws_pos_t *pos)
 	free_nearest_airport_list(arpts);
 }
 
+/*
+ * Negative Climb Rate (after takeoff)
+ */
 static void
-tawsb(const egpws_pos_t *pos, const egpws_arpt_ref_t *dest)
+tawsb_ncr(const egpws_pos_t *pos)
 {
-	double dest_dist = tawsb_dest_dist(pos, dest);
+	static const vect2_t alt_curve[] = {
+		VECT2(FEET2MET(50),	FEET2MET(-10)),
+		VECT2(FEET2MET(700),	FEET2MET(-70)),
+		NULL_VECT2
+	};
+	static const vect2_t vs_curve[] = {
+		VECT2(FEET2MET(50),	FPM2MPS(-100)),
+		VECT2(FEET2MET(700),	FPM2MPS(-500)),
+		NULL_VECT2
+	};
+	vect3_t my_ecef, dep_ecef;
+	double hgt, d_hdg, dist, vs_hgt, vs_alt, alt_lim, vs_lim, d_hgt, d_alt;
+	double terr_elev;
+
+	/* Reactivate NCR on the ground */
+	if (pos->on_gnd) {
+		dbg_log(egpws, 1, "ncr| on_gnd");
+		state.tawsb.ncr.active = B_TRUE;
+		state.tawsb.ncr.liftoff_pt = pos->pos;
+		state.tawsb.ncr.liftoff_hdg = pos->trk;
+		state.tawsb.ncr.max_hgt = 0;
+		state.tawsb.ncr.prev_hgt = 0;
+		state.tawsb.ncr.max_alt = pos->pos.elev;
+		state.tawsb.ncr.prev_alt = pos->pos.elev;
+		return;
+	}
+	if (!state.tawsb.ncr.active)
+		return;
+
+	/* Validate the NCR termination conditions */
+	my_ecef = geo2ecef(pos->pos, &wgs84);
+	dep_ecef = geo2ecef(state.tawsb.ncr.liftoff_pt, &wgs84);
+
+	dist = vect3_abs(vect3_sub(my_ecef, dep_ecef));
+	terr_elev = terr_get_elev(GEO3_TO_GEO2(pos->pos));
+	if (isnan(terr_elev))
+		terr_elev = 0;
+	hgt = pos->pos.elev - terr_elev;
+	d_hdg = ABS(rel_hdg(pos->trk, state.tawsb.ncr.liftoff_hdg));
+
+	if (hgt > MAX_NCR_HGT || d_hdg >= MAX_NCR_HDG_CHG ||
+	    dist > MAX_NCR_DIST) {
+		dbg_log(egpws, 1, "ncr| term  hgt:%.0f  d_hdg:%.0f  dist:%.0f",
+		    hgt, d_hdg, dist);
+		state.tawsb.ncr.active = B_FALSE;
+		return;
+	}
+
+	vs_hgt = (hgt - state.tawsb.ncr.prev_hgt) / RUN_INTVAL;
+	vs_alt = (pos->pos.elev - state.tawsb.ncr.prev_alt) / RUN_INTVAL;
+
+	d_hgt = hgt - state.tawsb.ncr.max_hgt;
+	d_alt = pos->pos.elev - state.tawsb.ncr.max_alt;
+
+	alt_lim = fx_lin_multi(hgt, alt_curve, B_FALSE);
+	vs_lim = fx_lin_multi(hgt, vs_curve, B_FALSE);
+
+	dbg_log(egpws, 1, "ncr| vs_hgt:%.1f  vs_alt:%.1f  "
+	    "d_hgt:%.0f  d_alt:%.0f  alt_lim:%.0f  vs_lim:%.0f",
+	    vs_hgt, vs_alt, d_hgt, d_alt, alt_lim, vs_lim);
+
+	if (vs_hgt < vs_lim || d_hgt < alt_lim) {
+		/*
+		 * If we're descend, advise against descent, otherwise advise
+		 * of rising terrain.
+		 */
+		if (vs_hgt < NCR_SUPRESS_CLB_RATE) {
+			if (vs_alt < 0)
+				sched_sound(SND_DONT_SINK);
+			else
+				sched_sound(SND_TOO_LOW_TERR);
+		}
+	} else if (vs_alt < vs_lim || d_alt < alt_lim) {
+		if (vs_hgt < NCR_SUPRESS_CLB_RATE)
+			sched_sound(SND_DONT_SINK);
+	}
+
+	state.tawsb.ncr.prev_hgt = hgt;
+	state.tawsb.ncr.max_hgt = MAX(state.tawsb.ncr.max_hgt, hgt);
+	state.tawsb.ncr.prev_alt = pos->pos.elev;
+	state.tawsb.ncr.max_alt = MAX(state.tawsb.ncr.max_alt, pos->pos.elev);
+}
+
+static void
+tawsb(const egpws_pos_t *pos, const egpws_arpt_ref_t *dest, double d_trk)
+{
+	double dest_dist, dest_hgt;
+
+	/* TAWS-B needs position */
+	if (IS_NULL_GEO_POS(pos->pos))
+		return;
+
+	tawsb_dest_dist(pos, dest, &dest_dist, &dest_hgt);
 	tawsb_edr(pos);
 	tawsb_pda(pos, dest, dest_dist);
 	tawsb_500(pos);
+	tawsb_ncr(pos);
+	tawsb_rtc_iti(pos, d_trk);
 }
 
 static void
@@ -384,6 +695,7 @@ main_loop(void)
 	mutex_enter(&lock);
 	while (!shutdown) {
 		egpws_pos_t pos;
+		double d_trk;
 		egpws_arpt_ref_t dest;
 
 		if (init_error)
@@ -392,18 +704,19 @@ main_loop(void)
 
 		mutex_enter(&glob_data.lock);
 		pos = glob_data.pos;
+		d_trk = glob_data.d_trk;
 		memcpy(&dest, &glob_data.dest, sizeof (dest));
 		mutex_exit(&glob_data.lock);
 
 		if (conf.type == EGPWS_MK_VIII)
 			mk8_mode1(&pos);
 		else
-			tawsb(&pos, &dest);
+			tawsb(&pos, &dest, d_trk);
 		unload_distant_airport_tiles(&db, GEO3_TO_GEO2(pos.pos));
 
 		mutex_enter(&lock);
 out:
-		cv_timedwait(&cv, &lock, now + RUN_INTVAL);
+		cv_timedwait(&cv, &lock, now + SEC2USEC(RUN_INTVAL));
 		now = microclock();
 	}
 	mutex_exit(&lock);
@@ -460,14 +773,31 @@ egpws_fini(void)
 }
 
 void
-egpws_set_position(egpws_pos_t pos)
+egpws_set_position(egpws_pos_t pos, double now)
 {
+	double d_t;
+
 	ASSERT(inited);
+
 	mutex_enter(&glob_data.lock);
+
+	d_t = now - glob_data.last_pos_update;
+	ASSERT3F(d_t, >, 0);
+	if (!isnan(glob_data.pos.trk) && !isnan(pos.trk)) {
+		double rel_trk = rel_hdg(glob_data.pos.trk, pos.trk) / d_t;
+		FILTER_IN(glob_data.d_trk, rel_trk, d_t, D_TRK_UPD_RATE);
+	} else if (!isnan(pos.trk)) {
+		glob_data.d_trk = pos.trk;
+	} else {
+		glob_data.d_trk = 0;
+	}
 	glob_data.pos = pos;
-	dbg_log(cfg, 1, "set pos %.4f x %.4f x %.0f",
-	    pos.pos.lat, pos.pos.lon, pos.pos.elev);
+	glob_data.last_pos_update = now;
+
 	mutex_exit(&glob_data.lock);
+
+	dbg_log(cfg, 1, "set pos %.4f x %.4f x %.0f   (d_trk: %.1f)",
+	    pos.pos.lat, pos.pos.lon, pos.pos.elev, glob_data.d_trk);
 }
 
 void

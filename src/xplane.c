@@ -140,7 +140,8 @@ sensor_cb(float elapsed, float elapsed2, int counter, void *refcon)
 	else
 		pos.ra = NAN;
 
-	egpws_set_position(pos);
+	/* Using real-time here to allow functioning in replay mode */
+	egpws_set_position(pos, USEC2SEC(microclock()));
 	terr_set_pos(terr_pos);
 
 	return (SENSOR_INTVAL);

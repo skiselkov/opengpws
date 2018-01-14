@@ -36,14 +36,14 @@ static bool_t inited = B_FALSE;
 static alc_t *alc = NULL;
 static mutex_t lock;
 static snd_t sounds[NUM_SOUNDS] = {
-	/* SND_PUP */
-	{ .filename = "pull_up.opus", .base_gain = 1.0 },
-	/* SND_TERR2 */
-	{ .filename = "terr2.opus", .base_gain = 1.0 },
 	/* SND_TERR_AHEAD_PUP */
 	{ .filename = "terr_ahead_pull_up.opus", .base_gain = 1.0 },
 	/* SND_OBST_AHEAD_PUP */
 	{ .filename = "obst_ahead_pull_up.opus", .base_gain = 1.0 },
+	/* SND_PUP */
+	{ .filename = "pull_up.opus", .base_gain = 1.0 },
+	/* SND_TERR2 */
+	{ .filename = "terr2.opus", .base_gain = 1.0 },
 	/* SND_WS */
 	{ .filename = "ws.opus", .base_gain = 1.0 },
 	/* SND_GOAR_WS_AHEAD, */
@@ -61,29 +61,29 @@ static snd_t sounds[NUM_SOUNDS] = {
 	/* SND_TOO_LOW_TERR */
 	{ .filename = "too_low_terr.opus", .base_gain = 1.0 },
 	/* SND_RA_10_BOEING */
-	{ .filename = "ra/boeing/10.opus", .base_gain = 0.3 },
+	{ .filename = "ra/boeing/10.opus", .base_gain = 0.35 },
 	/* SND_RA_20_BOEING */
-	{ .filename = "ra/boeing/20.opus", .base_gain = 0.3 },
+	{ .filename = "ra/boeing/20.opus", .base_gain = 0.35 },
 	/* SND_RA_30_BOEING */
-	{ .filename = "ra/boeing/30.opus", .base_gain = 0.3 },
+	{ .filename = "ra/boeing/30.opus", .base_gain = 0.35 },
 	/* SND_RA_40_BOEING */
-	{ .filename = "ra/boeing/40.opus", .base_gain = 0.3 },
+	{ .filename = "ra/boeing/40.opus", .base_gain = 0.35 },
 	/* SND_RA_50_BOEING */
-	{ .filename = "ra/boeing/50.opus", .base_gain = 0.3 },
+	{ .filename = "ra/boeing/50.opus", .base_gain = 0.35 },
 	/* SND_RA_100_BOEING */
-	{ .filename = "ra/boeing/100.opus", .base_gain = 0.3 },
+	{ .filename = "ra/boeing/100.opus", .base_gain = 0.35 },
 	/* SND_RA_200_BOEING */
-	{ .filename = "ra/boeing/200.opus", .base_gain = 0.3 },
+	{ .filename = "ra/boeing/200.opus", .base_gain = 0.35 },
 	/* SND_RA_300_BOEING */
-	{ .filename = "ra/boeing/300.opus", .base_gain = 0.3 },
+	{ .filename = "ra/boeing/300.opus", .base_gain = 0.35 },
 	/* SND_RA_400_BOEING */
-	{ .filename = "ra/boeing/400.opus", .base_gain = 0.3 },
+	{ .filename = "ra/boeing/400.opus", .base_gain = 0.35 },
 	/* SND_RA_500_BOEING */
-	{ .filename = "ra/boeing/500.opus", .base_gain = 0.3 },
+	{ .filename = "ra/boeing/500.opus", .base_gain = 0.35 },
 	/* SND_RA_1000_BOEING */
-	{ .filename = "ra/boeing/100.opus", .base_gain = 0.3 },
+	{ .filename = "ra/boeing/1000.opus", .base_gain = 0.35 },
 	/* SND_RA_2500_BOEING */
-	{ .filename = "ra/boeing/2500.opus", .base_gain = 0.3 },
+	{ .filename = "ra/boeing/2500.opus", .base_gain = 0.35 },
 	/* SND_TOO_LOW_GEAR */
 	{ .filename = "too_low_gear.opus", .base_gain = 1.0 },
 	/* SND_TOO_LOW_FLAPS */
@@ -100,7 +100,8 @@ static snd_t sounds[NUM_SOUNDS] = {
 
 struct {
 	dr_t	view_is_ext;
-	dr_t	sound_is_on;
+	dr_t	sound_on;
+	dr_t	paused;
 	dr_t	int_volume;
 	dr_t	warn_volume;
 } drs;
@@ -134,9 +135,10 @@ snd_sys_init(void)
 	}
 
 	fdr_find(&drs.view_is_ext, "sim/graphics/view/view_is_external");
-	fdr_find(&drs.sound_is_on, "sim/operation/sound/sound_on");
+	fdr_find(&drs.sound_on, "sim/operation/sound/sound_on");
 	fdr_find(&drs.int_volume, "sim/operation/sound/interior_volume_ratio");
 	fdr_find(&drs.warn_volume, "sim/operation/sound/warning_volume_ratio");
+	fdr_find(&drs.paused, "sim/time/paused");
 
 	return (B_TRUE);
 }
@@ -163,12 +165,13 @@ snd_sys_fini(void)
 void
 snd_sys_floop_cb(void)
 {
-	bool_t higher_playing = B_FALSE;
+	snd_id_t highest_playing = NUM_SOUNDS;
 	double gain;
 
 	ASSERT(inited);
 
-	if (dr_geti(&drs.view_is_ext) != 0 || dr_geti(&drs.sound_is_on) == 0)
+	if (dr_geti(&drs.view_is_ext) != 0 || dr_geti(&drs.sound_on) == 0 ||
+	    dr_geti(&drs.paused) != 0)
 		gain = 0;
 	else
 		gain = dr_getf(&drs.int_volume) * dr_getf(&drs.warn_volume);
@@ -177,21 +180,24 @@ snd_sys_floop_cb(void)
 	for (snd_id_t snd_id = 0; snd_id < NUM_SOUNDS; snd_id++) {
 		snd_t *snd = &sounds[snd_id];
 
+		if (wav_is_playing(snd->wav) && snd_id < highest_playing)
+			highest_playing = snd_id;
+
 		/*
 		 * If playback was requested and a higher priority is not yet
 		 * playing, play our message.
 		 */
-		if (snd->play && !higher_playing) {
+		if (snd->play && highest_playing > snd_id) {
 			if (!wav_is_playing(snd->wav))
 				wav_play(snd->wav);
 			snd->play = B_FALSE;
-			higher_playing = B_TRUE;
-		} else if (higher_playing && wav_is_playing(snd->wav)) {
+			highest_playing = snd_id;
+		} else if (highest_playing < snd_id &&
+		    wav_is_playing(snd->wav)) {
 			/* Stop lower priority messages */
 			wav_stop(snd->wav);
 			snd->play = B_FALSE;
 		}
-
 		if (snd->gain != gain * snd->base_gain) {
 			wav_set_gain(snd->wav, gain * snd->base_gain);
 			snd->gain = gain * snd->base_gain;

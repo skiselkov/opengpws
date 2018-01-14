@@ -33,6 +33,7 @@ dbg_log_init(const conf_t *conf)
 	conf_get_i(conf, "debug_terr", &dbg_level.terr);
 	conf_get_i(conf, "debug_tile", &dbg_level.tile);
 	conf_get_i(conf, "debug_cfg", &dbg_level.cfg);
+	conf_get_i(conf, "debug_rtc", &dbg_level.rtc);
 }
 
 void

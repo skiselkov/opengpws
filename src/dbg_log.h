@@ -34,6 +34,7 @@ typedef struct {
 	int	terr;
 	int	tile;
 	int	cfg;
+	int	rtc;
 } dbg_level_t;
 
 extern dbg_level_t dbg_level;

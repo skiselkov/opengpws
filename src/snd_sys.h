@@ -26,10 +26,10 @@ extern "C" {
 #endif
 
 typedef enum {
-	SND_PUP,		/* Pull up */
-	SND_TERR2,		/* Terrain, terrain */
 	SND_TERR_AHEAD_PUP,	/* Terrain ahead, pull up */
 	SND_OBST_AHEAD_PUP,	/* Obstacle ahead, pull up */
+	SND_PUP,		/* Pull up */
+	SND_TERR2,		/* Terrain, terrain */
 	SND_WS,			/* Windshear */
 	SND_GOAR_WS_AHEAD,	/* Go around, winshear ahead */
 	SND_WS_AHEAD,		/* Windshear ahead */

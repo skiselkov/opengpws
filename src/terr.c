@@ -591,3 +591,43 @@ terr_get_elev(geo_pos2_t pos)
 
 	return (elev);
 }
+
+double
+terr_get_elev_wide(geo_pos2_t pos)
+{
+	double elev = NAN;
+	dem_tile_t srch = { .lat = floor(pos.lat), .lon = floor(pos.lon) };
+	dem_tile_t *tile;
+
+	mutex_enter(&tile_cache_lock);
+	tile = avl_find(&tile_cache, &srch, NULL);
+	if (tile != NULL && !tile->empty) {
+		int x = clampi((pos.lon - tile->lon) * tile->pix_width,
+		    0, tile->pix_width - 1);
+		int y = clampi((pos.lat - tile->lat) * tile->pix_height,
+		    0, tile->pix_height - 1);
+
+		for (int xi = -1; xi <= 1; xi++) {
+			for (int yi = -1; yi <= 1; yi++) {
+				int xx = clampi(x + xi, 0,
+				    tile->pix_width - 1);
+				int yy = clampi(y + yi, 0,
+				    tile->pix_height - 1);
+				double e = tile->pixels[yy * tile->pix_width +
+				    xx];
+
+				if (isnan(elev))
+					elev = e;
+				else if (e > elev)
+					elev = e;
+			}
+		}
+		
+	}
+	mutex_exit(&tile_cache_lock);
+
+	dbg_log(terr, 3, "get elev (%.4fx%.4f) = %.0f\n", pos.lat, pos.lon,
+	    elev);
+
+	return (elev);
+}

@@ -245,10 +245,10 @@ static void
 tawsb_db_arpt_dist(const egpws_pos_t *pos, airport_t *arpt,
     double *arpt_dist_p, double *arpt_hgt_p)
 {
-	vect3_t my_ecef = geo2ecef(pos->pos, &wgs84);
-	vect3_t dest_ecef = geo2ecef(arpt->refpt, &wgs84);
+	vect3_t my_ecef = geo2ecef(GEO3_FT2M(pos->pos), &wgs84);
+	vect3_t dest_ecef = geo2ecef(GEO3_FT2M(arpt->refpt), &wgs84);
 	double dist = vect3_abs(vect3_sub(dest_ecef, my_ecef));
-	double elev = arpt->refpt.elev;
+	double elev = FEET2MET(arpt->refpt.elev);
 	vect2_t my_pos_2d = geo2fpp(GEO3_TO_GEO2(pos->pos), &arpt->fpp);
 
 	for (runway_t *rwy = avl_first(&arpt->rwys); rwy != NULL;
@@ -257,17 +257,19 @@ tawsb_db_arpt_dist(const egpws_pos_t *pos, airport_t *arpt,
 		if (point_in_poly(my_pos_2d, rwy->rwy_bbox)) {
 			*arpt_dist_p = 0;
 			/* Assume the runway elev is the mean of its ends */
-			*arpt_hgt_p = pos->pos.elev - ((rwy->ends[0].thr.elev +
+			*arpt_hgt_p = pos->pos.elev -
+			    FEET2MET((rwy->ends[0].thr.elev +
 			    rwy->ends[1].thr.elev) / 2);
 			return;
 		}
 
 		for (int i = 0; i < 2; i++) {
-			vect3_t p = geo2ecef(rwy->ends[i].thr, &wgs84);
+			vect3_t p = geo2ecef(GEO3_FT2M(rwy->ends[i].thr),
+			    &wgs84);
 			double d = vect3_abs(vect3_sub(p, my_ecef));
 			if (d < dist) {
 				dist = d;
-				elev = rwy->ends[i].thr.elev;
+				elev = FEET2MET(rwy->ends[i].thr.elev);
 			}
 		}
 	}
@@ -366,8 +368,8 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 		NULL_VECT2
 	};
 	static const vect2_t coll_curve[] = {
-		VECT2(NM2MET(0.5),	FEET2MET(50)),
-		VECT2(NM2MET(5),	FEET2MET(100)),
+		VECT2(NM2MET(0),	FEET2MET(50)),
+		VECT2(NM2MET(0.5),	FEET2MET(100)),
 		VECT2(1e11,		FEET2MET(100)),
 		NULL_VECT2
 	};
@@ -388,6 +390,8 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 		arpt_dist = 1e10;
 		arpt_hgt = 1e10;
 	}
+
+	printf("arpt_hgt: %.0f\n", arpt_hgt);
 
 	/* Inihibit within 0.5 NM and less than 200 ft above destination */
 	if (arpt_dist < RTC_INH_DIST_THRESH && arpt_hgt < RTC_INH_HGT_THRESH)
@@ -428,14 +432,12 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 	for (int i = 0; i < num_sim_steps; i++) {
 		if (i < num_sim_steps * RTC_WARN_STEP_FRACT &&
 		    hgt_samples[i] < coll_clr) {
-			min_hgt = hgt_samples[i];
 			warn_found = B_TRUE;
 			break;
 		}
-		if (hgt_samples[i] < rqd_clr) {
-			min_hgt = MIN(min_hgt, hgt_samples[i]);
+		if (hgt_samples[i] < rqd_clr)
 			caut_found = B_TRUE;
-		}
+		min_hgt = MIN(min_hgt, hgt_samples[i]);
 	}
 
 	if (warn_found) {
@@ -463,8 +465,8 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 		}
 		state.tawsb.rtc.ahead_played = B_FALSE;
 	} else {
-		dbg_log(rtc, 1, "rtc| rqd: %.0f  coll:%.0f = OK", rqd_clr,
-		    coll_clr);
+		dbg_log(rtc, 1, "rtc| min_hgt:%.0f  rqd: %.0f  coll:%.0f = OK",
+		    min_hgt, rqd_clr, coll_clr);
 		state.tawsb.rtc.ahead_played = B_FALSE;
 	}
 }
@@ -538,11 +540,14 @@ tawsb_500(const egpws_pos_t *pos)
 		for (runway_t *rwy = avl_first(&arpt->rwys);
 		    rwy != NULL; rwy = AVL_NEXT(&arpt->rwys, rwy)) {
 			for (int i = 0; i < 2; i++) {
-				double rd = vect3_abs(vect3_sub(geo2ecef(
-				    rwy->ends[i].thr, &wgs84), my_ecef));
+				vect3_t thr_p = geo2ecef(
+				    GEO3_FT2M(rwy->ends[i].thr), &wgs84);
+				double rd = vect3_abs(vect3_sub(thr_p,
+				    my_ecef));
 				if (rd < nrst_rwy_dist) {
 					nrst_rwy_dist = rd;
-					nrst_rwy_pos = rwy->ends[i].thr;
+					nrst_rwy_pos =
+					    GEO3_FT2M(rwy->ends[i].thr);
 				}
 			}
 		}
@@ -646,8 +651,8 @@ tawsb_ncr(const egpws_pos_t *pos)
 
 	if (vs_hgt < vs_lim || d_hgt < alt_lim) {
 		/*
-		 * If we're descend, advise against descent, otherwise advise
-		 * of rising terrain.
+		 * If we're descending, advise against descent,
+		 * otherwise advise of rising terrain.
 		 */
 		if (vs_hgt < NCR_SUPRESS_CLB_RATE) {
 			if (vs_alt < 0)

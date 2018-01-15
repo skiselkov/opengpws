@@ -151,9 +151,9 @@ load_dem_dsf(int lat, int lon, const dsf_atom_t **demi_p,
 	tnlc_ent_t *te;
 	avl_index_t where;
 
-	snprintf(dname, sizeof (dname), "%+03.0f%04.0f", 
+	snprintf(dname, sizeof (dname), "%+03.0f%+04.0f", 
 	    floor(lat / 10.0) * 10.0, floor(lon / 10.0) * 10.0);
-	snprintf(fname, sizeof (fname), "%+03d%04d.dsf", lat, lon);
+	snprintf(fname, sizeof (fname), "%+03d%+04d.dsf", lat, lon);
 
 	strlcpy(srch.fname, fname, sizeof (srch.fname));
 	te = avl_find(&tnlc, &srch, &where);
@@ -171,6 +171,8 @@ load_dem_dsf(int lat, int lon, const dsf_atom_t **demi_p,
 		    "X-Plane is running, no good will come of it.", te->path);
 		return (NULL);
 	}
+
+	dbg_log(tile, 3, "load dsf %d x %d = (%s/%s)", lat, lon, dname, fname);
 
 	for (srch_path_t *sp = list_head(&srch_paths); sp != NULL;
 	    sp = list_next(&srch_paths, sp)) {

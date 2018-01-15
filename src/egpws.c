@@ -44,7 +44,7 @@
 #define	ARPT_LOAD_LIMIT		NM2MET(23)
 
 static bool_t		inited = B_FALSE;
-static bool_t		shutdown = B_FALSE;
+static bool_t		main_shutdown = B_FALSE;
 static mutex_t		lock;
 static condvar_t	cv;
 static thread_t		worker;
@@ -698,7 +698,7 @@ main_loop(void)
 	egpws_boot();
 
 	mutex_enter(&lock);
-	while (!shutdown) {
+	while (!main_shutdown) {
 		egpws_pos_t pos;
 		double d_trk;
 		egpws_arpt_ref_t dest;
@@ -735,7 +735,7 @@ egpws_init(egpws_conf_t acf_conf)
 	ASSERT(!inited);
 
 	inited = B_TRUE;
-	shutdown = B_FALSE;
+	main_shutdown = B_FALSE;
 	mutex_init(&lock);
 	cv_init(&cv);
 
@@ -764,7 +764,7 @@ egpws_fini(void)
 		return;
 
 	mutex_enter(&lock);
-	shutdown = B_TRUE;
+	main_shutdown = B_TRUE;
 	cv_broadcast(&cv);
 	mutex_exit(&lock);
 

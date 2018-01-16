@@ -174,9 +174,16 @@ XPluginStart(char *name, char *sig, char *desc)
 	/* cut off the trailing path component (our filename) */
 	if ((p = strrchr(plugindir, DIRSEP)) != NULL)
 		*p = '\0';
-	/* cut off an optional '32' or '64' trailing component */
+	/*
+	 * Cut off an optional '32' or '64' trailing component. Please note
+	 * that XPLM 3.0 now supports OS-specific suffixes, so clamp those
+	 * away as well.
+	 */
 	if ((p = strrchr(plugindir, DIRSEP)) != NULL) {
-		if (strcmp(p + 1, "64") == 0 || strcmp(p + 1, "32") == 0)
+		if (strcmp(p + 1, "64") == 0 || strcmp(p + 1, "32") == 0 ||
+		    strcmp(p + 1, "win_x64") == 0 ||
+		    strcmp(p + 1, "mac_x64") == 0 ||
+		    strcmp(p + 1, "lin_x64") == 0)
 			*p = '\0';
 	}
 

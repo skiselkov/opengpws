@@ -12,12 +12,12 @@ mkdir -p "$OUTPUT_DIR"
 
 if [[ $(uname) = "Linux" ]]; then
 	$INSTALL -- "qmake/output/64/lin.xpl" \
-	    "$OUTPUT_DIR/lin_64/${OUTPUT_DIR}.xpl"
+	    "$OUTPUT_DIR/lin_x64/${OUTPUT_DIR}.xpl"
 	$INSTALL -- "qmake/output/64/win.xpl" \
-	    "$OUTPUT_DIR/win_64/${OUTPUT_DIR}.xpl"
+	    "$OUTPUT_DIR/win_x64/${OUTPUT_DIR}.xpl"
 else
 	$INSTALL -- "qmake/output/64/mac.xpl" \
-	    "$OUTPUT_DIR/mac_64/${OUTPUT_DIR}.xpl"
+	    "$OUTPUT_DIR/mac_x64/${OUTPUT_DIR}.xpl"
 fi
 
 find data -iname '*.opus' | while read; do

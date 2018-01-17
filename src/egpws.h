@@ -31,6 +31,8 @@ void egpws_set_position(egpws_pos_t pos, double now);
 void egpws_set_dest(const egpws_arpt_ref_t *ref);
 void egpws_set_flaps_ovrd(bool_t flag);
 
+const egpws_conf_t *egpws_get_conf(void);
+
 #ifdef __cplusplus
 }
 #endif

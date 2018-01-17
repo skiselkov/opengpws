@@ -95,7 +95,7 @@ static float
 sensor_cb(float elapsed, float elapsed2, int counter, void *refcon)
 {
 	egpws_pos_t pos;
-	geo_pos2_t terr_pos;
+	geo_pos3_t terr_pos;
 
 	UNUSED(elapsed);
 	UNUSED(elapsed2);
@@ -110,13 +110,13 @@ sensor_cb(float elapsed, float elapsed2, int counter, void *refcon)
 		    dr_getf(&elev));
 		pos.trk = dr_getf(&trk);
 		pos.gs = dr_getf(&gs);
-		terr_pos = GEO_POS2(pos.pos.lat, pos.pos.lon);
+		terr_pos = pos.pos;
 	} else {
 		pos.pos = NULL_GEO_POS3;
 		pos.trk = NAN;
 		pos.gs = NAN;
 		pos.vs = NAN;
-		terr_pos = NULL_GEO_POS2;
+		terr_pos = NULL_GEO_POS3;
 	}
 	if (dr_geti(&asi_fail) != 6)
 		pos.asi = KT2MPS(dr_getf(&asi_kts));
@@ -296,8 +296,12 @@ XPluginReceiveMessage(XPLMPluginID from, int msg, void *param)
 	switch (msg) {
 	case EGPWS_SET_STATE:
 		if (param != NULL && !booted) {
+			const egpws_conf_t *conf = param;
+
+			VERIFY(conf->terr_colors != NULL);
+
 			terr_init(xpdir);
-			egpws_init(*(egpws_conf_t *)param);
+			egpws_init(*conf);
 			booted = B_TRUE;
 			pos_ok = B_TRUE;
 			ra_ok = B_TRUE;
@@ -336,6 +340,12 @@ XPluginReceiveMessage(XPLMPluginID from, int msg, void *param)
 		VERIFY(booted);
 		terr_set_ranges(param);
 		break;
+	case EGPWS_GET_TERR_TILE_SET: {
+		egpws_terr_tile_set_t **tile_set_pp = param;
+		VERIFY(tile_set_pp != NULL);
+		*tile_set_pp = terr_get_tile_set();
+		break;
+	}
 	}
 }
 

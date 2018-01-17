@@ -22,21 +22,26 @@
 #include <stdlib.h>
 #include <math.h>
 
+#include <XPLMGraphics.h>
+
 #include <acfutils/assert.h>
 #include <acfutils/avl.h>
 #include <acfutils/dsf.h>
 #include <acfutils/helpers.h>
 #include <acfutils/list.h>
 #include <acfutils/math.h>
+#include <acfutils/perf.h>
 #include <acfutils/thread.h>
 #include <acfutils/time.h>
 
 #include <GL/glew.h>
 
 #include "dbg_log.h"
+#include "egpws.h"
 #include "terr.h"
 
 #define	LOAD_WORKER_INTVAL	1			/* seconds */
+#define	PAINT_WORKER_INTVAL	0.5			/* seconds */
 #define	EARTH_CIRC		(2 * EARTH_MSL * M_PI)	/* meters */
 #define	TILE_HEIGHT		(EARTH_CIRC / 360.0)	/* meters */
 #define	MAX_LAT			80			/* degrees */
@@ -45,6 +50,7 @@
 #define	MIN_RNG			5000			/* meters */
 #define	DFL_RNG			50000			/* meters */
 #define	MAX_RNG			600000			/* meters */
+#define	ALT_QUANT_STEP		FEET2MET(100)		/* quantization step */
 
 typedef struct {
 	int		lat;		/* latitude in degrees */
@@ -81,15 +87,23 @@ static list_t srch_paths;
 static char *dsf_paths[180][360];
 static char *xpdir = NULL;
 
-static geo_pos2_t pos = NULL_GEO_POS2;
+static mutex_t glob_pos_lock;
+static geo_pos3_t glob_pos = NULL_GEO_POS3;
 
 static bool_t load_worker_shutdown = B_TRUE;
 static mutex_t load_worker_lock;
 static condvar_t load_worker_cv;
 static thread_t load_worker_thread;
 
-static mutex_t tile_cache_lock;
-static avl_tree_t tile_cache;
+static bool_t paint_worker_shutdown = B_TRUE;
+static mutex_t paint_worker_lock;
+static condvar_t paint_worker_cv;
+static thread_t paint_worker_thread;
+
+static mutex_t dem_tile_cache_lock;
+static avl_tree_t dem_tile_cache;
+
+static egpws_terr_tile_set_t terr_tile_set;
 
 /*
  * The tile name lookup cache. Makes lookups for previously seen tiles faster.
@@ -104,9 +118,25 @@ static const egpws_range_t dfl_ranges[] = {
 static const egpws_range_t *ranges = dfl_ranges;
 
 static int
-tile_compar(const void *a, const void *b)
+dem_tile_compar(const void *a, const void *b)
 {
 	const dem_tile_t *ta = a, *tb = b;
+
+	if (ta->lat < tb->lat)
+		return (-1);
+	if (ta->lat > tb->lat)
+		return (1);
+	if (ta->lon < tb->lon)
+		return (-1);
+	if (ta->lon > tb->lon)
+		return (1);
+	return (0);
+}
+
+static int
+terr_tile_compar(const void *a, const void *b)
+{
+	const egpws_terr_tile_t *ta = a, *tb = b;
 
 	if (ta->lat < tb->lat)
 		return (-1);
@@ -201,7 +231,7 @@ load_dem_dsf(int lat, int lon, const dsf_atom_t **demi_p,
 }
 
 static void
-render_tile(dem_tile_t *tile, const dsf_atom_t *demi,
+render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
     const dsf_atom_t *demd)
 {
 	double tile_width = (EARTH_CIRC / 360) * cos(DEG2RAD(tile->lat));
@@ -234,10 +264,10 @@ render_tile(dem_tile_t *tile, const dsf_atom_t *demi,
 			    clampi(elev, INT16_MIN, INT16_MAX);
 		}
 	}
-	mutex_enter(&tile_cache_lock);
+	mutex_enter(&dem_tile_cache_lock);
 	free(tile->pixels);
 	tile->pixels = pixels;
-	mutex_exit(&tile_cache_lock);
+	mutex_exit(&dem_tile_cache_lock);
 }
 
 static void
@@ -248,7 +278,7 @@ load_tile(int lat, int lon, double load_res)
 	dem_tile_t *tile;
 	bool_t existing;
 
-	tile = avl_find(&tile_cache, &srch, &where);
+	tile = avl_find(&dem_tile_cache, &srch, &where);
 	existing = (tile != NULL);
 	if (tile == NULL || tile->load_res != load_res) {
 		const dsf_atom_t *demi, *demd;
@@ -265,16 +295,16 @@ load_tile(int lat, int lon, double load_res)
 		}
 		tile->load_res = load_res;
 		if (dsf != NULL) {
-			render_tile(tile, demi, demd);
+			render_dem_tile(tile, demi, demd);
 			tile->empty = B_FALSE;
 		} else {
 			tile->empty = B_TRUE;
 		}
 
 		if (!existing) {
-			mutex_enter(&tile_cache_lock);
-			avl_insert(&tile_cache, tile, where);
-			mutex_exit(&tile_cache_lock);
+			mutex_enter(&dem_tile_cache_lock);
+			avl_insert(&dem_tile_cache, tile, where);
+			mutex_exit(&dem_tile_cache_lock);
 		} else {
 			dbg_log(tile, 2, "tile res chg %f -> %f",
 			    tile->load_res, load_res);
@@ -288,7 +318,7 @@ load_tile(int lat, int lon, double load_res)
 }
 
 static double
-select_tile_res(int tile_lat, int tile_lon)
+select_tile_res(geo_pos3_t pos, int tile_lat, int tile_lon)
 {
 	int lat = floor(pos.lat);
 	int lon = floor(pos.lon);
@@ -326,7 +356,7 @@ select_tile_res(int tile_lat, int tile_lon)
 }
 
 static void
-load_nrst_tiles(void)
+load_nrst_tiles(geo_pos3_t pos)
 {
 	int tile_width;
 	int h_tiles, v_tiles;
@@ -352,14 +382,14 @@ load_nrst_tiles(void)
 			if (load_worker_shutdown)
 				return;
 
-			res = select_tile_res(tile_lat, tile_lon);
+			res = select_tile_res(pos, tile_lat, tile_lon);
 			load_tile(tile_lat, tile_lon, res);
 		}
 	}
 }
 
 static void
-free_tile(dem_tile_t *tile)
+free_dem_tile(dem_tile_t *tile)
 {
 	dbg_log(tile, 2, "free tile %d x %d", tile->lat, tile->lon);
 	free(tile->pixels);
@@ -443,31 +473,36 @@ load_worker(void *unused)
 
 	mutex_enter(&load_worker_lock);
 	while (!load_worker_shutdown) {
+		geo_pos3_t pos;
+
 		dbg_log(tile, 4, "loop");
+
+		mutex_enter(&glob_pos_lock);
+		pos = glob_pos;
+		mutex_exit(&glob_pos_lock);
 
 		/*
 		 * Mark all tiles as dirty. The load process will undirty
 		 * the ones we want to keep.
 		 */
-		for (dem_tile_t *tile = avl_first(&tile_cache); tile != NULL;
-		    tile = AVL_NEXT(&tile_cache, tile)) {
+		for (dem_tile_t *tile = avl_first(&dem_tile_cache);
+		    tile != NULL; tile = AVL_NEXT(&dem_tile_cache, tile))
 			tile->dirty = B_TRUE;
-		}
 
 		if (!IS_NULL_GEO_POS(pos))
-			load_nrst_tiles();
+			load_nrst_tiles(pos);
 
 		/* Unload dirty tiles */
-		mutex_enter(&tile_cache_lock);
-		for (dem_tile_t *tile = avl_first(&tile_cache), *next = NULL;
-		    tile != NULL; tile = next) {
-			next = AVL_NEXT(&tile_cache, tile);
+		mutex_enter(&dem_tile_cache_lock);
+		for (dem_tile_t *tile = avl_first(&dem_tile_cache),
+		    *next = NULL; tile != NULL; tile = next) {
+			next = AVL_NEXT(&dem_tile_cache, tile);
 			if (tile->dirty) {
-				avl_remove(&tile_cache, tile);
-				free_tile(tile);
+				avl_remove(&dem_tile_cache, tile);
+				free_dem_tile(tile);
 			}
 		}
-		mutex_exit(&tile_cache_lock);
+		mutex_exit(&dem_tile_cache_lock);
 
 		cv_timedwait(&load_worker_cv, &load_worker_lock,
 		    microclock() + SEC2USEC(LOAD_WORKER_INTVAL));
@@ -475,6 +510,135 @@ load_worker(void *unused)
 	mutex_exit(&load_worker_lock);
 
 	dbg_log(tile, 4, "load worker shutdown");
+}
+
+static void
+render_terr_tile(geo_pos3_t pos, egpws_terr_tile_t *tile, dem_tile_t *dt)
+{
+	unsigned dt_width = dt->pix_width, dt_height = dt->pix_height;
+	const egpws_conf_t *conf = egpws_get_conf();
+
+	ASSERT(!dt->empty);
+
+	if (tile->pix_width != dt_width || tile->pix_height != dt_height) {
+		free(tile->pixels);
+		tile->pix_width = dt_width;
+		tile->pix_height = dt_height;
+		tile->pixels = calloc(tile->pix_width * tile->pix_height,
+		    sizeof (*tile->pixels));
+	}
+
+	/* Preset the pixels to black */
+	for (unsigned j = 0; j < dt_width * dt_height; j++)
+		tile->pixels[j] = BE32(0xff);
+
+	for (int i = 0; conf->terr_colors[i].max_hgt >
+	    conf->terr_colors[i].min_hgt; i++) {
+		const egpws_terr_color_t *color = &conf->terr_colors[i];
+
+		for (unsigned j = 0; j < dt_width * dt_height; j++) {
+			int hgt = pos.elev - dt->pixels[j];
+			if (hgt >= color->min_hgt && hgt < color->max_hgt)
+				tile->pixels[j] = color->color_rgba;
+		}
+	}
+}
+
+static void
+paint_worker(void *unused)
+{
+	geo_pos3_t last_pos;
+
+	UNUSED(unused);
+
+	mutex_enter(&paint_worker_lock);
+	while (!paint_worker_shutdown) {
+		geo_pos3_t pos;
+
+		dbg_log(painter, 2, "loop");
+
+		mutex_enter(&glob_pos_lock);
+		pos = glob_pos;
+		mutex_exit(&glob_pos_lock);
+
+		mutex_enter(&dem_tile_cache_lock);
+		mutex_enter(&terr_tile_set.lock);
+
+		for (egpws_terr_tile_t *tile = avl_first(&terr_tile_set.tiles),
+		    *next_tile = NULL; tile != NULL; tile = next_tile) {
+			dem_tile_t srch = {.lat = tile->lat, .lon = tile->lon};
+			dem_tile_t *dt;
+
+			next_tile = AVL_NEXT(&terr_tile_set.tiles, tile);
+
+			if (tile->remove)
+				continue;
+			dt = avl_find(&dem_tile_cache, &srch, NULL);
+			if (dt == NULL) {
+				/* Tile no longer in cache, mark for removal */
+				dbg_log(painter, 1, "remove tile %d x %d",
+				    tile->lat, tile->lon);
+				free(tile->pixels);
+				tile->pixels = NULL;
+				tile->remove = B_TRUE;
+				continue;
+			}
+			if ((tile->pix_width != dt->pix_width ||
+			    tile->pix_height != dt->pix_height ||
+			    pos.elev != last_pos.elev) && !dt->empty) {
+				/*
+				 * Since only we can modify the private part
+				 * of a terrain tile, we can exit the lock to
+				 * let avionics retrieve the old tile set for
+				 * their rendering loops. The main thread
+				 * never touches the pixel array.
+				 */
+				mutex_exit(&terr_tile_set.lock);
+				render_terr_tile(pos, tile, dt);
+				mutex_enter(&terr_tile_set.lock);
+				/* Tell main thread to re-upload the texture */
+				tile->dirty = B_TRUE;
+			}
+		}
+
+		/* Add any new DEM tiles */
+		for (dem_tile_t *dt = avl_first(&dem_tile_cache); dt != NULL;
+		    dt = AVL_NEXT(&dem_tile_cache, dt)) {
+			egpws_terr_tile_t srch = {
+			    .lat = dt->lat, .lon = dt->lon
+			};
+			egpws_terr_tile_t *tile;
+			avl_index_t where;
+
+			tile = avl_find(&terr_tile_set.tiles, &srch, &where);
+			if (tile != NULL)
+				/* Tile already rendered, move on */
+				continue;
+			mutex_exit(&terr_tile_set.lock);
+
+			dbg_log(painter, 1, "new tile %d x %d",
+			    dt->lat, dt->lon);
+			tile = calloc(1, sizeof (*tile));
+			tile->lat = dt->lat;
+			tile->lon = dt->lon;
+			if (!dt->empty) {
+				tile->dirty = B_TRUE;
+				render_terr_tile(pos, tile, dt);
+			}
+
+			mutex_enter(&terr_tile_set.lock);
+			avl_insert(&terr_tile_set.tiles, tile, where);
+		}
+
+		mutex_exit(&terr_tile_set.lock);
+		mutex_exit(&dem_tile_cache_lock);
+
+		last_pos = pos;
+		cv_timedwait(&paint_worker_cv, &paint_worker_lock,
+		    microclock() + SEC2USEC(PAINT_WORKER_INTVAL));
+	}
+
+	mutex_exit(&paint_worker_lock);
 }
 
 void
@@ -485,8 +649,10 @@ terr_init(const char *the_xpdir)
 
 	xpdir = strdup(the_xpdir);
 
-	mutex_init(&tile_cache_lock);
-	avl_create(&tile_cache, tile_compar, sizeof (dem_tile_t),
+	mutex_init(&glob_pos_lock);
+
+	mutex_init(&dem_tile_cache_lock);
+	avl_create(&dem_tile_cache, dem_tile_compar, sizeof (dem_tile_t),
 	    offsetof(dem_tile_t, cache_node));
 	avl_create(&tnlc, tnlc_compar, sizeof (tnlc_ent_t),
 	    offsetof(tnlc_ent_t, tnlc_node));
@@ -494,10 +660,19 @@ terr_init(const char *the_xpdir)
 	list_create(&srch_paths, sizeof (srch_path_t),
 	    offsetof(srch_path_t, node));
 
+	mutex_init(&terr_tile_set.lock);
+	avl_create(&terr_tile_set.tiles, terr_tile_compar,
+	    sizeof (egpws_terr_tile_t), offsetof(egpws_terr_tile_t, node));
+
 	load_worker_shutdown = B_FALSE;
 	mutex_init(&load_worker_lock);
 	cv_init(&load_worker_cv);
 	VERIFY(thread_create(&load_worker_thread, load_worker, NULL));
+
+	paint_worker_shutdown = B_FALSE;
+	mutex_init(&paint_worker_lock);
+	cv_init(&paint_worker_cv);
+	VERIFY(thread_create(&paint_worker_thread, paint_worker, NULL));
 }
 
 void
@@ -507,11 +682,13 @@ terr_fini(void)
 	dem_tile_t *tile;
 	void *cookie;
 	tnlc_ent_t *te;
+	egpws_terr_tile_t *terr_tile;
 
 	if (!inited)
 		return;
 	inited = B_FALSE;
 
+	/* Kill the tile loader */
 	load_worker_shutdown = B_TRUE;
 	mutex_enter(&load_worker_lock);
 	cv_broadcast(&load_worker_cv);
@@ -520,6 +697,27 @@ terr_fini(void)
 
 	mutex_destroy(&load_worker_lock);
 	cv_destroy(&load_worker_cv);
+
+	/* Kill the tile painter */
+	paint_worker_shutdown = B_TRUE;
+	mutex_enter(&paint_worker_lock);
+	cv_broadcast(&paint_worker_cv);
+	mutex_exit(&paint_worker_lock);
+	thread_join(&paint_worker_thread);
+
+	mutex_destroy(&paint_worker_lock);
+	cv_destroy(&paint_worker_cv);
+
+	cookie = NULL;
+	while ((terr_tile = avl_destroy_nodes(&terr_tile_set.tiles, &cookie)) !=
+	    NULL) {
+		if (terr_tile->tex != 0)
+			glDeleteTextures(1, &terr_tile->tex);
+		free(terr_tile->pixels);
+		free(terr_tile);
+	}
+	mutex_destroy(&terr_tile_set.lock);
+	avl_destroy(&terr_tile_set.tiles);
 
 	for (int i = 0; i < 180; i++) {
 		for (int j = 0; j < 360; j++)
@@ -533,12 +731,12 @@ terr_fini(void)
 	list_destroy(&srch_paths);
 
 	cookie = NULL;
-	while ((tile = avl_destroy_nodes(&tile_cache, &cookie)) != NULL) {
+	while ((tile = avl_destroy_nodes(&dem_tile_cache, &cookie)) != NULL) {
 		free(tile->pixels);
 		free(tile);
 	}
-	avl_destroy(&tile_cache);
-	mutex_destroy(&tile_cache_lock);
+	avl_destroy(&dem_tile_cache);
+	mutex_destroy(&dem_tile_cache_lock);
 
 	cookie = NULL;
 	while ((te = avl_destroy_nodes(&tnlc, &cookie)) != NULL) {
@@ -547,18 +745,27 @@ terr_fini(void)
 	}
 	avl_destroy(&tnlc);
 
+	mutex_destroy(&glob_pos_lock);
+
 	free(xpdir);
 }
 
 void
-terr_set_pos(geo_pos2_t new_pos)
+terr_set_pos(geo_pos3_t new_pos)
 {
-	if (ABS(new_pos.lat) >= MAX_LAT)
-		pos = NULL_GEO_POS2;
-	else
-		pos = new_pos;
+	mutex_enter(&glob_pos_lock);
 
-	dbg_log(terr, 2, "set pos %.4f x %.4f", pos.lat, pos.lon);
+	if (ABS(new_pos.lat) >= MAX_LAT) {
+		glob_pos = NULL_GEO_POS3;
+	} else {
+		new_pos.elev = round(new_pos.elev / ALT_QUANT_STEP) *
+		    ALT_QUANT_STEP;
+		glob_pos = new_pos;
+	}
+	dbg_log(terr, 2, "set pos %.4f x %.4f x %.0f",
+	    glob_pos.lat, glob_pos.lon, glob_pos.elev);
+
+	mutex_exit(&glob_pos_lock);
 }
 
 void
@@ -577,8 +784,8 @@ terr_get_elev(geo_pos2_t pos)
 	dem_tile_t srch = { .lat = floor(pos.lat), .lon = floor(pos.lon) };
 	dem_tile_t *tile;
 
-	mutex_enter(&tile_cache_lock);
-	tile = avl_find(&tile_cache, &srch, NULL);
+	mutex_enter(&dem_tile_cache_lock);
+	tile = avl_find(&dem_tile_cache, &srch, NULL);
 	if (tile != NULL && !tile->empty) {
 		int x = clampi((pos.lon - tile->lon) * tile->pix_width,
 		    0, tile->pix_width - 1);
@@ -586,7 +793,7 @@ terr_get_elev(geo_pos2_t pos)
 		    0, tile->pix_height - 1);
 		elev = tile->pixels[y * tile->pix_width + x];
 	}
-	mutex_exit(&tile_cache_lock);
+	mutex_exit(&dem_tile_cache_lock);
 
 	dbg_log(terr, 3, "get elev (%.4fx%.4f) = %.0f\n", pos.lat, pos.lon,
 	    elev);
@@ -601,8 +808,8 @@ terr_get_elev_wide(geo_pos2_t pos)
 	dem_tile_t srch = { .lat = floor(pos.lat), .lon = floor(pos.lon) };
 	dem_tile_t *tile;
 
-	mutex_enter(&tile_cache_lock);
-	tile = avl_find(&tile_cache, &srch, NULL);
+	mutex_enter(&dem_tile_cache_lock);
+	tile = avl_find(&dem_tile_cache, &srch, NULL);
 	if (tile != NULL && !tile->empty) {
 		int x = clampi((pos.lon - tile->lon) * tile->pix_width,
 		    0, tile->pix_width - 1);
@@ -615,8 +822,8 @@ terr_get_elev_wide(geo_pos2_t pos)
 				    tile->pix_width - 1);
 				int yy = clampi(y + yi, 0,
 				    tile->pix_height - 1);
-				double e = tile->pixels[yy * tile->pix_width +
-				    xx];
+				double e =
+				    tile->pixels[yy * tile->pix_width + xx];
 
 				if (isnan(elev))
 					elev = e;
@@ -626,10 +833,54 @@ terr_get_elev_wide(geo_pos2_t pos)
 		}
 		
 	}
-	mutex_exit(&tile_cache_lock);
+	mutex_exit(&dem_tile_cache_lock);
 
-	dbg_log(terr, 3, "get elev (%.4fx%.4f) = %.0f\n", pos.lat, pos.lon,
-	    elev);
+	dbg_log(terr, 3, "get elev (%.4fx%.4f) = %.0f\n",
+	    pos.lat, pos.lon, elev);
 
 	return (elev);
+}
+
+egpws_terr_tile_set_t *
+terr_get_tile_set(void)
+{
+	/* On the main thread we can do all of our OpenGL calls */
+	mutex_enter(&terr_tile_set.lock);
+	for (egpws_terr_tile_t *tile = avl_first(&terr_tile_set.tiles),
+	    *next_tile = NULL; tile != NULL; tile = next_tile) {
+		next_tile = AVL_NEXT(&terr_tile_set.tiles, tile);
+
+		if (tile->remove) {
+			dbg_log(painter, 1, "free tile %d x %d",
+			    tile->lat, tile->lon);
+			avl_remove(&terr_tile_set.tiles, tile);
+			if (tile->tex != 0)
+				glDeleteTextures(1, &tile->tex);
+			free(tile);
+			continue;
+		}
+		if (tile->dirty) {
+			dbg_log(painter, 2, "upload tile %d x %d",
+			    tile->lat, tile->lon);
+			if (tile->tex == 0) {
+				dbg_log(painter, 2, "tex alloc tile %d x %d",
+				    tile->lat, tile->lon);
+				glGenTextures(1, &tile->tex);
+				XPLMBindTexture2d(tile->tex, GL_TEXTURE_2D);
+				glTexParameteri(GL_TEXTURE_2D,
+				    GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+				glTexParameteri(GL_TEXTURE_2D,
+				    GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			}
+			ASSERT(tile->pixels != NULL);
+			XPLMBindTexture2d(tile->tex, GL_TEXTURE_2D);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tile->pix_width,
+			    tile->pix_height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+			    tile->pixels);
+			tile->dirty = B_FALSE;
+		}
+	}
+	mutex_exit(&terr_tile_set.lock);
+
+	return (&terr_tile_set);
 }

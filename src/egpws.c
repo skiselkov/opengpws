@@ -391,8 +391,6 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 		arpt_hgt = 1e10;
 	}
 
-	printf("arpt_hgt: %.0f\n", arpt_hgt);
-
 	/* Inihibit within 0.5 NM and less than 200 ft above destination */
 	if (arpt_dist < RTC_INH_DIST_THRESH && arpt_hgt < RTC_INH_HGT_THRESH)
 		return;
@@ -825,4 +823,10 @@ egpws_set_dest(const egpws_arpt_ref_t *ref)
 		memcpy(&glob_data.dest, ref, sizeof (glob_data.dest));
 	}
 	mutex_exit(&glob_data.lock);
+}
+
+const egpws_conf_t *
+egpws_get_conf(void)
+{
+	return (&conf);
 }

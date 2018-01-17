@@ -29,10 +29,12 @@ extern "C" {
 void terr_init(const char *xpdir);
 void terr_fini(void);
 
-void terr_set_pos(geo_pos2_t pos);
+void terr_set_pos(geo_pos3_t pos);
 void terr_set_ranges(const egpws_range_t *new_rngs);
 double terr_get_elev(geo_pos2_t pos);
 double terr_get_elev_wide(geo_pos2_t pos);
+
+egpws_terr_tile_set_t *terr_get_tile_set(void);
 
 #ifdef __cplusplus
 }

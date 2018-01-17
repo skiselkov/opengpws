@@ -35,6 +35,7 @@ typedef struct {
 	int	tile;
 	int	cfg;
 	int	rtc;
+	int	painter;
 } dbg_level_t;
 
 extern dbg_level_t dbg_level;

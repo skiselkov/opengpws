@@ -19,7 +19,11 @@
 #ifndef	_OPENGPWS_XPLANE_API_H_
 #define	_OPENGPWS_XPLANE_API_H_
 
+#include <GL/glew.h>
+
 #include <acfutils/geom.h>
+#include <acfutils/avl.h>
+#include <acfutils/thread.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -66,11 +70,18 @@ typedef enum {
 } egpws_syst_type_t;
 
 typedef struct {
-	bool_t		jet;	/* aircraft is a turbojet */
-	appr_min_t	appr_min; /* how to call out approaching minimums */
-	ra_call_mask_t	ra_calls; /* how/if to annunciate RA altitudes */
-	ra_500_type_t	ra_500;	/* how to annunciate "FIVE HUNDRED" */
-	egpws_syst_type_t type;	/* system type */
+	int		min_hgt;
+	int		max_hgt;
+	uint32_t	color_rgba;
+} egpws_terr_color_t;
+
+typedef struct {
+	bool_t		jet;		/* aircraft is a turbojet */
+	appr_min_t	appr_min;	/* how to call out approaching mins */
+	ra_call_mask_t	ra_calls;	/* how/if to annunciate RA altitudes */
+	ra_500_type_t	ra_500;		/* how to annunciate "FIVE HUNDRED" */
+	egpws_syst_type_t	type;		/* system type */
+	const egpws_terr_color_t *terr_colors;	/* color patterns */
 } egpws_conf_t;
 
 typedef struct {
@@ -95,6 +106,28 @@ typedef struct {
 	geo_pos3_t	pos;		/* airport geographic position */
 } egpws_arpt_ref_t;
 
+typedef struct {
+	int			lat;
+	int			lon;
+	GLuint			tex;
+
+	/* OpenGPWS-internal */
+	bool_t			dirty;
+	bool_t			remove;
+
+	/* modified only from painter thread */
+	unsigned		pix_width;
+	unsigned		pix_height;
+	uint32_t		*pixels;
+
+	avl_node_t		node;
+} egpws_terr_tile_t;
+
+typedef struct {
+	avl_tree_t		tiles;
+	mutex_t			lock;
+} egpws_terr_tile_set_t;
+
 enum {
 	EGPWS_SET_STATE =	0x100000,	/* bool_t param */
 	EGPWS_SET_FLAPS_OVRD,			/* bool_t param */
@@ -104,7 +137,8 @@ enum {
 	EGPWS_SET_DEST,				/* arpt_ref_t * param */
 	EGPWS_SET_NAV1_ON,			/* bool_t param */
 	EGPWS_SET_NAV2_ON,			/* bool_t param */
-	EGPWS_SET_RANGES			/* egpws_range_t ptr param */
+	EGPWS_SET_RANGES,			/* egpws_range_t ptr param */
+	EGPWS_GET_TERR_TILE_SET			/* egpws_terr_tile_set_t ** */
 };
 
 #ifdef __cplusplus

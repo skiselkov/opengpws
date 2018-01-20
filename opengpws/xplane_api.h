@@ -128,6 +128,12 @@ typedef struct {
 	mutex_t			lock;
 } egpws_terr_tile_set_t;
 
+typedef enum {
+	EGPWS_ADVISORY_NONE,
+	EGPWS_ADVISORY_TERRAIN,
+	EGPWS_ADVISORY_PULL_UP
+} egpws_advisory_t;
+
 enum {
 	EGPWS_SET_STATE =	0x100000,	/* bool_t param */
 	EGPWS_SET_FLAPS_OVRD,			/* bool_t param */
@@ -138,7 +144,9 @@ enum {
 	EGPWS_SET_NAV1_ON,			/* bool_t param */
 	EGPWS_SET_NAV2_ON,			/* bool_t param */
 	EGPWS_SET_RANGES,			/* egpws_range_t ptr param */
-	EGPWS_GET_TERR_TILE_SET			/* egpws_terr_tile_set_t ** */
+	EGPWS_GET_TERR_TILE_SET,		/* egpws_terr_tile_set_t ** */
+	EGPWS_GET_ADVISORY,			/* egpws_advisory_t * param */
+	EGPWS_SET_SOUND_INH			/* bool_t param */
 };
 
 #ifdef __cplusplus

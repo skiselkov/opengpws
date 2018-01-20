@@ -860,8 +860,9 @@ terr_get_tile_set(void)
 			continue;
 		}
 		if (tile->dirty) {
-			dbg_log(painter, 2, "upload tile %d x %d",
-			    tile->lat, tile->lon);
+			dbg_log(painter, 2, "upload tile %d x %d  "
+			    "(%dpx x %dpx)", tile->lat, tile->lon,
+			    tile->pix_width, tile->pix_height);
 			if (tile->tex == 0) {
 				dbg_log(painter, 2, "tex alloc tile %d x %d",
 				    tile->lat, tile->lon);

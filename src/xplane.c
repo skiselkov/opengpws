@@ -343,9 +343,21 @@ XPluginReceiveMessage(XPLMPluginID from, int msg, void *param)
 	case EGPWS_GET_TERR_TILE_SET: {
 		egpws_terr_tile_set_t **tile_set_pp = param;
 		VERIFY(tile_set_pp != NULL);
+		VERIFY(booted);
 		*tile_set_pp = terr_get_tile_set();
 		break;
 	}
+	case EGPWS_GET_ADVISORY: {
+		egpws_advisory_t *adv_p = param;
+		VERIFY(adv_p != NULL);
+		VERIFY(booted);
+		*adv_p = egpws_get_advisory();
+		break;
+	}
+	case EGPWS_SET_SOUND_INH:
+		VERIFY(booted);
+		snd_sys_set_inh((bool_t)(uintptr_t)param);
+		break;
 	}
 }
 

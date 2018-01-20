@@ -35,6 +35,7 @@ typedef struct {
 static bool_t inited = B_FALSE;
 static alc_t *alc = NULL;
 static mutex_t lock;
+static bool_t sound_inh = B_FALSE;
 static snd_t sounds[NUM_SOUNDS] = {
 	/* SND_TERR_AHEAD_PUP */
 	{ .filename = "terr_ahead_pull_up.opus", .base_gain = 1.0 },
@@ -120,6 +121,7 @@ snd_sys_init(void)
 
 	mutex_init(&lock);
 	alc = openal_init(NULL, B_FALSE);
+	sound_inh = B_FALSE;
 
 	for (snd_id_t snd = 0; snd < NUM_SOUNDS; snd++) {
 		char *filename = mkpathname(get_plugindir(), "data",
@@ -132,6 +134,7 @@ snd_sys_init(void)
 			snd_sys_fini();
 			return (B_FALSE);
 		}
+		sounds[snd].gain = -1;
 	}
 
 	fdr_find(&drs.view_is_ext, "sim/graphics/view/view_is_external");
@@ -171,7 +174,7 @@ snd_sys_floop_cb(void)
 	ASSERT(inited);
 
 	if (dr_geti(&drs.view_is_ext) != 0 || dr_geti(&drs.sound_on) == 0 ||
-	    dr_geti(&drs.paused) != 0)
+	    dr_geti(&drs.paused) != 0 || sound_inh)
 		gain = 0;
 	else
 		gain = dr_getf(&drs.int_volume) * dr_getf(&drs.warn_volume);
@@ -182,6 +185,11 @@ snd_sys_floop_cb(void)
 
 		if (wav_is_playing(snd->wav) && snd_id < highest_playing)
 			highest_playing = snd_id;
+
+		if (snd->gain != gain * snd->base_gain) {
+			wav_set_gain(snd->wav, gain * snd->base_gain);
+			snd->gain = gain * snd->base_gain;
+		}
 
 		/*
 		 * If playback was requested and a higher priority is not yet
@@ -197,10 +205,6 @@ snd_sys_floop_cb(void)
 			/* Stop lower priority messages */
 			wav_stop(snd->wav);
 			snd->play = B_FALSE;
-		}
-		if (snd->gain != gain * snd->base_gain) {
-			wav_set_gain(snd->wav, gain * snd->base_gain);
-			snd->gain = gain * snd->base_gain;
 		}
 	}
 	mutex_exit(&lock);
@@ -226,4 +230,10 @@ unsched_sound(snd_id_t snd)
 	mutex_enter(&lock);
 	sounds[snd].play = B_FALSE;
 	mutex_exit(&lock);
+}
+
+void
+snd_sys_set_inh(bool_t flag)
+{
+	sound_inh = flag;
 }

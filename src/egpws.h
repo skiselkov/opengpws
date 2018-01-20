@@ -32,6 +32,7 @@ void egpws_set_dest(const egpws_arpt_ref_t *ref);
 void egpws_set_flaps_ovrd(bool_t flag);
 
 const egpws_conf_t *egpws_get_conf(void);
+egpws_advisory_t egpws_get_advisory(void);
 
 #ifdef __cplusplus
 }

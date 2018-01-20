@@ -63,6 +63,8 @@ static struct {
 } glob_data;
 
 static struct {
+	mutex_t			adv_lock;
+	egpws_advisory_t	adv;
 	struct {
 		struct {
 			double last_caut_vs;
@@ -153,6 +155,7 @@ mk8_mode1(const egpws_pos_t *pos)
 
 	if (pos->vs > warn_vs) {
 		sched_sound(SND_PUP);
+		state.adv = MAX(state.adv, EGPWS_ADVISORY_PULL_UP);
 	} else if (pos->vs >= caut_vs) {
 		double next_caut_vs;
 		double caut_vs_20pct = caut_vs * 0.2;
@@ -167,6 +170,7 @@ mk8_mode1(const egpws_pos_t *pos)
 		    next_caut_vs > state.mk8.mode1.last_caut_vs) {
 			state.mk8.mode1.last_caut_vs = next_caut_vs;
 			sched_sound(SND_SINKRATE);
+			state.adv = MAX(state.adv, EGPWS_ADVISORY_TERRAIN);
 		}
 	} else {
 		state.mk8.mode1.last_caut_vs = 0;
@@ -218,16 +222,19 @@ tawsb_edr(const egpws_pos_t *pos)
 		state.tawsb.edr.lo_caut = B_TRUE;
 		state.tawsb.edr.hi_caut = B_TRUE;
 		sched_sound(SND_PUP);
+		state.adv = MAX(state.adv, EGPWS_ADVISORY_PULL_UP);
 	} else if (pos->vs <= caut_vs) {
 		if (!state.tawsb.edr.lo_caut) {
 			dbg_log(egpws, 2, "edr| lo_caut");
 			state.tawsb.edr.lo_caut = B_TRUE;
 			sched_sound(SND_SINKRATE);
+			state.adv = MAX(state.adv, EGPWS_ADVISORY_TERRAIN);
 		} else if (!state.tawsb.edr.hi_caut &&
 		    pos->vs < (caut_vs + warn_vs) / 2) {
 			dbg_log(egpws, 2, "edr| hi_caut");
 			state.tawsb.edr.hi_caut = B_TRUE;
 			sched_sound(SND_SINKRATE);
+			state.adv = MAX(state.adv, EGPWS_ADVISORY_TERRAIN);
 		}
 	} else {
 		dbg_log(egpws, 3, "edr| clear");
@@ -446,6 +453,7 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 			state.tawsb.rtc.ahead_played = B_TRUE;
 		}
 		sched_sound(SND_PUP);
+		state.adv = MAX(state.adv, EGPWS_ADVISORY_PULL_UP);
 	} else if (caut_found) {
 		snd_id_t snd;
 		double now = USEC2SEC(microclock());
@@ -456,6 +464,7 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 			snd = SND_TOO_LOW_TERR;
 		else
 			snd = SND_TERR_AHEAD;
+		state.adv = MAX(state.adv, EGPWS_ADVISORY_TERRAIN);
 
 		if (now - state.tawsb.rtc.last_caut_time > RTC_CAUT_INTVAL) {
 			sched_sound(snd);
@@ -503,8 +512,10 @@ tawsb_pda(const egpws_pos_t *pos, const egpws_arpt_ref_t *dest,
 
 	min_elev = min_hgt + dest->pos.elev;
 	dbg_log(egpws, 1, "pda| elv: %.0f  min: %.0f", pos->pos.elev, min_elev);
-	if (pos->pos.elev < min_elev)
+	if (pos->pos.elev < min_elev) {
 		sched_sound(SND_TOO_LOW_TERR);
+		state.adv = MAX(state.adv, EGPWS_ADVISORY_TERRAIN);
+	}
 }
 
 /*
@@ -657,10 +668,13 @@ tawsb_ncr(const egpws_pos_t *pos)
 				sched_sound(SND_DONT_SINK);
 			else
 				sched_sound(SND_TOO_LOW_TERR);
+			state.adv = MAX(state.adv, EGPWS_ADVISORY_TERRAIN);
 		}
 	} else if (vs_alt < vs_lim || d_alt < alt_lim) {
-		if (vs_hgt < NCR_SUPRESS_CLB_RATE)
+		if (vs_hgt < NCR_SUPRESS_CLB_RATE) {
 			sched_sound(SND_DONT_SINK);
+			state.adv = MAX(state.adv, EGPWS_ADVISORY_TERRAIN);
+		}
 	}
 
 	state.tawsb.ncr.prev_hgt = hgt;
@@ -711,10 +725,13 @@ main_loop(void)
 		memcpy(&dest, &glob_data.dest, sizeof (dest));
 		mutex_exit(&glob_data.lock);
 
+		mutex_enter(&state.adv_lock);
+		state.adv = EGPWS_ADVISORY_NONE;
 		if (conf.type == EGPWS_MK_VIII)
 			mk8_mode1(&pos);
 		else
 			tawsb(&pos, &dest, d_trk);
+		mutex_exit(&state.adv_lock);
 		unload_distant_airport_tiles(&db, GEO3_TO_GEO2(pos.pos));
 
 		mutex_enter(&lock);
@@ -741,6 +758,7 @@ egpws_init(egpws_conf_t acf_conf)
 
 	memset(&glob_data, 0, sizeof (glob_data));
 	mutex_init(&glob_data.lock);
+	mutex_init(&state.adv_lock);
 	glob_data.pos.pos = NULL_GEO_POS3;
 
 	memset(&state, 0, sizeof (state));
@@ -768,6 +786,7 @@ egpws_fini(void)
 
 	thread_join(&worker);
 
+	mutex_destroy(&state.adv_lock);
 	mutex_destroy(&glob_data.lock);
 	mutex_destroy(&lock);
 	cv_destroy(&cv);
@@ -829,4 +848,16 @@ const egpws_conf_t *
 egpws_get_conf(void)
 {
 	return (&conf);
+}
+
+egpws_advisory_t
+egpws_get_advisory(void)
+{
+	egpws_advisory_t adv;
+
+	mutex_enter(&state.adv_lock);
+	adv = state.adv;
+	mutex_exit(&state.adv_lock);
+
+	return (adv);
 }

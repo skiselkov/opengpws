@@ -153,6 +153,7 @@ XPluginStart(char *name, char *sig, char *desc)
 	char *p;
 	char *confpath;
 	conf_t *conf = NULL;
+	GLenum err;
 
 	log_init(XPLMDebugString, "OpenGPWS");
 	crc64_init();
@@ -203,6 +204,18 @@ XPluginStart(char *name, char *sig, char *desc)
 	strcpy(desc, PLUGIN_DESCRIPTION);
 
 	XPLMGetVersions(&xp_ver, &xplm_ver, &host_id);
+
+	err = glewInit();
+	if (err != GLEW_OK) {
+		/* Problem: glewInit failed, something is seriously wrong. */
+		logMsg("FATAL ERROR: cannot initialize libGLEW: %s",
+		    glewGetErrorString(err));
+		return (0);
+	}
+	if (!GLEW_VERSION_2_1) {
+		logMsg("FATAL ERROR: your system doesn't support OpenGL 2.1");
+		return (0);
+	}
 
 	confpath = mkpathname(xpdir, plugindir, "OpenGPWS.cfg", NULL);
 	if (file_exists(confpath, NULL)) {
@@ -300,8 +313,8 @@ XPluginReceiveMessage(XPLMPluginID from, int msg, void *param)
 
 			VERIFY(conf->terr_colors != NULL);
 
-			terr_init(xpdir);
-			egpws_init(*conf);
+			terr_init(xpdir, plugindir);
+			egpws_init(conf);
 			booted = B_TRUE;
 			pos_ok = B_TRUE;
 			ra_ok = B_TRUE;
@@ -340,11 +353,11 @@ XPluginReceiveMessage(XPLMPluginID from, int msg, void *param)
 		VERIFY(booted);
 		terr_set_ranges(param);
 		break;
-	case EGPWS_GET_TERR_TILE_SET: {
-		egpws_terr_tile_set_t **tile_set_pp = param;
-		VERIFY(tile_set_pp != NULL);
+	case EGPWS_TERR_RENDER: {
+		egpws_render_t *render = param;
+		VERIFY(render != NULL);
 		VERIFY(booted);
-		*tile_set_pp = terr_get_tile_set();
+		terr_render(render);
 		break;
 	}
 	case EGPWS_GET_ADVISORY: {

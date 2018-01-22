@@ -745,7 +745,7 @@ out:
 }
 
 void
-egpws_init(egpws_conf_t acf_conf)
+egpws_init(const egpws_conf_t *acf_conf)
 {
 	ASSERT(!inited);
 
@@ -754,7 +754,7 @@ egpws_init(egpws_conf_t acf_conf)
 	mutex_init(&lock);
 	cv_init(&cv);
 
-	conf = acf_conf;
+	memcpy(&conf, acf_conf, sizeof (conf));
 
 	memset(&glob_data, 0, sizeof (glob_data));
 	mutex_init(&glob_data.lock);

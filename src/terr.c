@@ -22,6 +22,8 @@
 #include <stdlib.h>
 #include <math.h>
 
+#include <GL/glew.h>
+
 #include <XPLMGraphics.h>
 
 #include <acfutils/assert.h>
@@ -31,17 +33,17 @@
 #include <acfutils/list.h>
 #include <acfutils/math.h>
 #include <acfutils/perf.h>
+#include <acfutils/shader.h>
+#include <acfutils/worker.h>
 #include <acfutils/thread.h>
 #include <acfutils/time.h>
-
-#include <GL/glew.h>
 
 #include "dbg_log.h"
 #include "egpws.h"
 #include "terr.h"
 
-#define	LOAD_WORKER_INTVAL	1			/* seconds */
-#define	PAINT_WORKER_INTVAL	0.5			/* seconds */
+#define	LOAD_DEM_WORKER_INTVAL	1			/* seconds */
+#define	TERR_TILE_WORKER_INTVAL	1			/* seconds */
 #define	EARTH_CIRC		(2 * EARTH_MSL * M_PI)	/* meters */
 #define	TILE_HEIGHT		(EARTH_CIRC / 360.0)	/* meters */
 #define	MAX_LAT			80			/* degrees */
@@ -50,7 +52,7 @@
 #define	MIN_RNG			5000			/* meters */
 #define	DFL_RNG			50000			/* meters */
 #define	MAX_RNG			600000			/* meters */
-#define	ALT_QUANT_STEP		FEET2MET(100)		/* quantization step */
+#define	ALT_QUANT_STEP		FEET2MET(20)		/* quantization step */
 
 typedef struct {
 	int		lat;		/* latitude in degrees */
@@ -61,11 +63,15 @@ typedef struct {
 	unsigned	pix_width;	/* tile width in pixels */
 	unsigned	pix_height;	/* tile height in pixels */
 	int16_t		*pixels;	/* elevation data samples */
-	bool_t		dirty;		/* mark for removal */
+	bool_t		dirty;		/* pending upload to GPU */
+	GLsync		in_flight;	/* data in flight to GPU */
 	bool_t		empty;		/* tile contains no data */
+	bool_t		seen;		/* seen in presence check */
+	bool_t		remove;		/* mark for removal */
 
-	mutex_t		tex_lock;
-	GLuint		tex;
+	int		cur_tex;
+	GLuint		tex[2];
+	GLuint		pbo;
 
 	avl_node_t	cache_node;
 } dem_tile_t;
@@ -90,20 +96,12 @@ static char *xpdir = NULL;
 static mutex_t glob_pos_lock;
 static geo_pos3_t glob_pos = NULL_GEO_POS3;
 
-static bool_t load_worker_shutdown = B_TRUE;
-static mutex_t load_worker_lock;
-static condvar_t load_worker_cv;
-static thread_t load_worker_thread;
-
-static bool_t paint_worker_shutdown = B_TRUE;
-static mutex_t paint_worker_lock;
-static condvar_t paint_worker_cv;
-static thread_t paint_worker_thread;
+static worker_t	load_dem_worker_wk;
 
 static mutex_t dem_tile_cache_lock;
 static avl_tree_t dem_tile_cache;
 
-static egpws_terr_tile_set_t terr_tile_set;
+static GLuint DEM_prog = 0;
 
 /*
  * The tile name lookup cache. Makes lookups for previously seen tiles faster.
@@ -121,22 +119,6 @@ static int
 dem_tile_compar(const void *a, const void *b)
 {
 	const dem_tile_t *ta = a, *tb = b;
-
-	if (ta->lat < tb->lat)
-		return (-1);
-	if (ta->lat > tb->lat)
-		return (1);
-	if (ta->lon < tb->lon)
-		return (-1);
-	if (ta->lon > tb->lon)
-		return (1);
-	return (0);
-}
-
-static int
-terr_tile_compar(const void *a, const void *b)
-{
-	const egpws_terr_tile_t *ta = a, *tb = b;
 
 	if (ta->lat < tb->lat)
 		return (-1);
@@ -223,6 +205,9 @@ load_dem_dsf(int lat, int lon, const dsf_atom_t **demi_p,
 		if (dsf != NULL)
 			dsf_fini(dsf);
 		free(path);
+
+		if (!load_dem_worker_wk.run)
+			break;
 	}
 
 	dbg_log(tile, 3, "load dsf %d x %d = (not found)", lat, lon);
@@ -271,50 +256,65 @@ render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
 }
 
 static void
-load_tile(int lat, int lon, double load_res)
+load_dem_tile(int lat, int lon, double load_res)
 {
-	avl_index_t where;
 	dem_tile_t srch = { .lat = lat, .lon = lon };
 	dem_tile_t *tile;
 	bool_t existing;
+	dsf_t *dsf = NULL;
+	const dsf_atom_t *demi, *demd;
 
-	tile = avl_find(&dem_tile_cache, &srch, &where);
+	mutex_enter(&dem_tile_cache_lock);
+	tile = avl_find(&dem_tile_cache, &srch, NULL);
+	if (tile != NULL && tile->remove) {
+		/* Tile being removed, don't touch it until it is gone */
+		mutex_exit(&dem_tile_cache_lock);
+		return;
+	}
+	mutex_exit(&dem_tile_cache_lock);
+
 	existing = (tile != NULL);
-	if (tile == NULL || tile->load_res != load_res) {
-		const dsf_atom_t *demi, *demd;
-		dsf_t *dsf = NULL;
 
-		/* Don't reload empty tiles, it will never succeed. */
-		dsf = load_dem_dsf(lat, lon, &demi, &demd);
-
-		dbg_log(tile, 2, "load tile %d x %d (dsf: %p)", lat, lon, dsf);
-		if (tile == NULL) {
-			tile = calloc(1, sizeof (*tile));
-			tile->lat = lat;
-			tile->lon = lon;
-		}
-		tile->load_res = load_res;
-		if (dsf != NULL) {
-			render_dem_tile(tile, demi, demd);
-			tile->empty = B_FALSE;
-		} else {
-			tile->empty = B_TRUE;
-		}
-
-		if (!existing) {
-			mutex_enter(&dem_tile_cache_lock);
-			avl_insert(&dem_tile_cache, tile, where);
-			mutex_exit(&dem_tile_cache_lock);
-		} else {
-			dbg_log(tile, 2, "tile res chg %f -> %f",
-			    tile->load_res, load_res);
-		}
-
-		if (dsf != NULL)
-			dsf_fini(dsf);
+	if (tile != NULL &&
+	    (tile->empty || tile->dirty || tile->load_res == load_res)) {
+		tile->seen = B_TRUE;
+		return;
 	}
 
-	tile->dirty = B_FALSE;
+	if (tile == NULL) {
+		tile = calloc(1, sizeof (*tile));
+		tile->lat = lat;
+		tile->lon = lon;
+		tile->cur_tex = -1;
+	}
+	tile->load_res = load_res;
+
+	dsf = load_dem_dsf(lat, lon, &demi, &demd);
+
+	dbg_log(tile, 2, "load tile %d x %d (dsf: %p)", lat, lon, dsf);
+
+	if (dsf != NULL) {
+		ASSERT(!tile->empty);
+		render_dem_tile(tile, demi, demd);
+		/* marks the tile for GPU upload */
+		tile->dirty = B_TRUE;
+	} else {
+		tile->empty = B_TRUE;
+	}
+
+	if (!existing) {
+		mutex_enter(&dem_tile_cache_lock);
+		avl_add(&dem_tile_cache, tile);
+		mutex_exit(&dem_tile_cache_lock);
+	} else {
+		dbg_log(tile, 2, "tile res chg %f -> %f",
+		    tile->load_res, load_res);
+	}
+
+	if (dsf != NULL)
+		dsf_fini(dsf);
+
+	tile->seen = B_TRUE;
 }
 
 static double
@@ -356,7 +356,7 @@ select_tile_res(geo_pos3_t pos, int tile_lat, int tile_lon)
 }
 
 static void
-load_nrst_tiles(geo_pos3_t pos)
+load_nrst_dem_tiles(geo_pos3_t pos)
 {
 	int tile_width;
 	int h_tiles, v_tiles;
@@ -379,11 +379,11 @@ load_nrst_tiles(geo_pos3_t pos)
 			int tile_lat = floor(pos.lat + v);
 			int tile_lon = floor(pos.lon + h);
 
-			if (load_worker_shutdown)
+			if (!load_dem_worker_wk.run)
 				return;
 
 			res = select_tile_res(pos, tile_lat, tile_lon);
-			load_tile(tile_lat, tile_lon, res);
+			load_dem_tile(tile_lat, tile_lon, res);
 		}
 	}
 }
@@ -392,6 +392,12 @@ static void
 free_dem_tile(dem_tile_t *tile)
 {
 	dbg_log(tile, 2, "free tile %d x %d", tile->lat, tile->lon);
+	for (int i = 0; i < 2; i++) {
+		if (tile->tex[i] != 0)
+			glDeleteTextures(1, &tile->tex[i]);
+	}
+	if (tile->pbo != 0)
+		glDeleteBuffers(1, &tile->pbo);
 	free(tile->pixels);
 	free(tile);
 }
@@ -463,187 +469,62 @@ errout:
 	free(path);
 }
 
-static void
-load_worker(void *unused)
+static bool_t
+load_dem_worker(void *unused)
 {
-	UNUSED(unused);
-
-	append_cust_srch_paths();
-	append_glob_srch_paths();
-
-	mutex_enter(&load_worker_lock);
-	while (!load_worker_shutdown) {
-		geo_pos3_t pos;
-
-		dbg_log(tile, 4, "loop");
-
-		mutex_enter(&glob_pos_lock);
-		pos = glob_pos;
-		mutex_exit(&glob_pos_lock);
-
-		/*
-		 * Mark all tiles as dirty. The load process will undirty
-		 * the ones we want to keep.
-		 */
-		for (dem_tile_t *tile = avl_first(&dem_tile_cache);
-		    tile != NULL; tile = AVL_NEXT(&dem_tile_cache, tile))
-			tile->dirty = B_TRUE;
-
-		if (!IS_NULL_GEO_POS(pos))
-			load_nrst_tiles(pos);
-
-		/* Unload dirty tiles */
-		mutex_enter(&dem_tile_cache_lock);
-		for (dem_tile_t *tile = avl_first(&dem_tile_cache),
-		    *next = NULL; tile != NULL; tile = next) {
-			next = AVL_NEXT(&dem_tile_cache, tile);
-			if (tile->dirty) {
-				avl_remove(&dem_tile_cache, tile);
-				free_dem_tile(tile);
-			}
-		}
-		mutex_exit(&dem_tile_cache_lock);
-
-		cv_timedwait(&load_worker_cv, &load_worker_lock,
-		    microclock() + SEC2USEC(LOAD_WORKER_INTVAL));
-	}
-	mutex_exit(&load_worker_lock);
-
-	dbg_log(tile, 4, "load worker shutdown");
-}
-
-static void
-render_terr_tile(geo_pos3_t pos, egpws_terr_tile_t *tile, dem_tile_t *dt)
-{
-	unsigned dt_width = dt->pix_width, dt_height = dt->pix_height;
-	const egpws_conf_t *conf = egpws_get_conf();
-
-	ASSERT(!dt->empty);
-
-	if (tile->pix_width != dt_width || tile->pix_height != dt_height) {
-		free(tile->pixels);
-		tile->pix_width = dt_width;
-		tile->pix_height = dt_height;
-		tile->pixels = calloc(tile->pix_width * tile->pix_height,
-		    sizeof (*tile->pixels));
-	}
-
-	/* Preset the pixels to black */
-	for (unsigned j = 0; j < dt_width * dt_height; j++)
-		tile->pixels[j] = BE32(0xff);
-
-	for (int i = 0; conf->terr_colors[i].max_hgt >
-	    conf->terr_colors[i].min_hgt; i++) {
-		const egpws_terr_color_t *color = &conf->terr_colors[i];
-
-		for (unsigned j = 0; j < dt_width * dt_height; j++) {
-			int hgt = pos.elev - dt->pixels[j];
-			if (hgt >= color->min_hgt && hgt < color->max_hgt)
-				tile->pixels[j] = color->color_rgba;
-		}
-	}
-}
-
-static void
-paint_worker(void *unused)
-{
-	geo_pos3_t last_pos;
+	geo_pos3_t pos;
 
 	UNUSED(unused);
 
-	mutex_enter(&paint_worker_lock);
-	while (!paint_worker_shutdown) {
-		geo_pos3_t pos;
+	dbg_log(tile, 4, "loop");
 
-		dbg_log(painter, 2, "loop");
-
-		mutex_enter(&glob_pos_lock);
-		pos = glob_pos;
-		mutex_exit(&glob_pos_lock);
-
-		mutex_enter(&dem_tile_cache_lock);
-		mutex_enter(&terr_tile_set.lock);
-
-		for (egpws_terr_tile_t *tile = avl_first(&terr_tile_set.tiles),
-		    *next_tile = NULL; tile != NULL; tile = next_tile) {
-			dem_tile_t srch = {.lat = tile->lat, .lon = tile->lon};
-			dem_tile_t *dt;
-
-			next_tile = AVL_NEXT(&terr_tile_set.tiles, tile);
-
-			if (tile->remove)
-				continue;
-			dt = avl_find(&dem_tile_cache, &srch, NULL);
-			if (dt == NULL) {
-				/* Tile no longer in cache, mark for removal */
-				dbg_log(painter, 1, "remove tile %d x %d",
-				    tile->lat, tile->lon);
-				free(tile->pixels);
-				tile->pixels = NULL;
-				tile->remove = B_TRUE;
-				continue;
-			}
-			if ((tile->pix_width != dt->pix_width ||
-			    tile->pix_height != dt->pix_height ||
-			    pos.elev != last_pos.elev) && !dt->empty) {
-				/*
-				 * Since only we can modify the private part
-				 * of a terrain tile, we can exit the lock to
-				 * let avionics retrieve the old tile set for
-				 * their rendering loops. The main thread
-				 * never touches the pixel array.
-				 */
-				mutex_exit(&terr_tile_set.lock);
-				render_terr_tile(pos, tile, dt);
-				mutex_enter(&terr_tile_set.lock);
-				/* Tell main thread to re-upload the texture */
-				tile->dirty = B_TRUE;
-			}
-		}
-
-		/* Add any new DEM tiles */
-		for (dem_tile_t *dt = avl_first(&dem_tile_cache); dt != NULL;
-		    dt = AVL_NEXT(&dem_tile_cache, dt)) {
-			egpws_terr_tile_t srch = {
-			    .lat = dt->lat, .lon = dt->lon
-			};
-			egpws_terr_tile_t *tile;
-			avl_index_t where;
-
-			tile = avl_find(&terr_tile_set.tiles, &srch, &where);
-			if (tile != NULL)
-				/* Tile already rendered, move on */
-				continue;
-			mutex_exit(&terr_tile_set.lock);
-
-			dbg_log(painter, 1, "new tile %d x %d",
-			    dt->lat, dt->lon);
-			tile = calloc(1, sizeof (*tile));
-			tile->lat = dt->lat;
-			tile->lon = dt->lon;
-			if (!dt->empty) {
-				tile->dirty = B_TRUE;
-				render_terr_tile(pos, tile, dt);
-			}
-
-			mutex_enter(&terr_tile_set.lock);
-			avl_insert(&terr_tile_set.tiles, tile, where);
-		}
-
-		mutex_exit(&terr_tile_set.lock);
-		mutex_exit(&dem_tile_cache_lock);
-
-		last_pos = pos;
-		cv_timedwait(&paint_worker_cv, &paint_worker_lock,
-		    microclock() + SEC2USEC(PAINT_WORKER_INTVAL));
+	/* No search paths yet, initialize them */
+	if (list_head(&srch_paths) == NULL) {
+		append_cust_srch_paths();
+		append_glob_srch_paths();
 	}
 
-	mutex_exit(&paint_worker_lock);
+	mutex_enter(&glob_pos_lock);
+	pos = glob_pos;
+	mutex_exit(&glob_pos_lock);
+
+	/*
+	 * Mark all tiles as unseen. The load process will mark
+	 * the ones we want to keep.
+	 */
+	mutex_enter(&dem_tile_cache_lock);
+	for (dem_tile_t *tile = avl_first(&dem_tile_cache);
+	    tile != NULL; tile = AVL_NEXT(&dem_tile_cache, tile)) {
+		tile->seen = B_FALSE;
+	}
+	mutex_exit(&dem_tile_cache_lock);
+
+	if (!IS_NULL_GEO_POS(pos))
+		load_nrst_dem_tiles(pos);
+
+	/* Unload unseen tiles */
+	mutex_enter(&dem_tile_cache_lock);
+	for (dem_tile_t *tile = avl_first(&dem_tile_cache),
+	    *next = NULL; tile != NULL; tile = next) {
+		next = AVL_NEXT(&dem_tile_cache, tile);
+		if (!tile->seen) {
+			/*
+			 * Must be removed by foreground thread to properly
+			 * dispose of OpenGL objects.
+			 */
+			tile->remove = B_TRUE;
+		}
+	}
+	mutex_exit(&dem_tile_cache_lock);
+
+	return (B_TRUE);
 }
 
 void
-terr_init(const char *the_xpdir)
+terr_init(const char *the_xpdir, const char *plugindir)
 {
+	char *vtx_prog_path, *frag_prog_path;
+
 	ASSERT(!inited);
 	inited = B_TRUE;
 
@@ -660,19 +541,17 @@ terr_init(const char *the_xpdir)
 	list_create(&srch_paths, sizeof (srch_path_t),
 	    offsetof(srch_path_t, node));
 
-	mutex_init(&terr_tile_set.lock);
-	avl_create(&terr_tile_set.tiles, terr_tile_compar,
-	    sizeof (egpws_terr_tile_t), offsetof(egpws_terr_tile_t, node));
+	worker_init(&load_dem_worker_wk, load_dem_worker,
+	    SEC2USEC(LOAD_DEM_WORKER_INTVAL), NULL);
 
-	load_worker_shutdown = B_FALSE;
-	mutex_init(&load_worker_lock);
-	cv_init(&load_worker_cv);
-	VERIFY(thread_create(&load_worker_thread, load_worker, NULL));
-
-	paint_worker_shutdown = B_FALSE;
-	mutex_init(&paint_worker_lock);
-	cv_init(&paint_worker_cv);
-	VERIFY(thread_create(&paint_worker_thread, paint_worker, NULL));
+	vtx_prog_path = mkpathname(xpdir, plugindir, "data", "DEM_vtx.glsl",
+	    NULL);
+	frag_prog_path = mkpathname(xpdir, plugindir, "data", "DEM_frag.glsl",
+	    NULL);
+	DEM_prog = shader_prog_from_file("DEM_shader", vtx_prog_path,
+	    frag_prog_path);
+	lacf_free(vtx_prog_path);
+	lacf_free(frag_prog_path);
 }
 
 void
@@ -682,42 +561,12 @@ terr_fini(void)
 	dem_tile_t *tile;
 	void *cookie;
 	tnlc_ent_t *te;
-	egpws_terr_tile_t *terr_tile;
 
 	if (!inited)
 		return;
 	inited = B_FALSE;
 
-	/* Kill the tile loader */
-	load_worker_shutdown = B_TRUE;
-	mutex_enter(&load_worker_lock);
-	cv_broadcast(&load_worker_cv);
-	mutex_exit(&load_worker_lock);
-	thread_join(&load_worker_thread);
-
-	mutex_destroy(&load_worker_lock);
-	cv_destroy(&load_worker_cv);
-
-	/* Kill the tile painter */
-	paint_worker_shutdown = B_TRUE;
-	mutex_enter(&paint_worker_lock);
-	cv_broadcast(&paint_worker_cv);
-	mutex_exit(&paint_worker_lock);
-	thread_join(&paint_worker_thread);
-
-	mutex_destroy(&paint_worker_lock);
-	cv_destroy(&paint_worker_cv);
-
-	cookie = NULL;
-	while ((terr_tile = avl_destroy_nodes(&terr_tile_set.tiles, &cookie)) !=
-	    NULL) {
-		if (terr_tile->tex != 0)
-			glDeleteTextures(1, &terr_tile->tex);
-		free(terr_tile->pixels);
-		free(terr_tile);
-	}
-	mutex_destroy(&terr_tile_set.lock);
-	avl_destroy(&terr_tile_set.tiles);
+	worker_fini(&load_dem_worker_wk);
 
 	for (int i = 0; i < 180; i++) {
 		for (int j = 0; j < 360; j++)
@@ -731,10 +580,8 @@ terr_fini(void)
 	list_destroy(&srch_paths);
 
 	cookie = NULL;
-	while ((tile = avl_destroy_nodes(&dem_tile_cache, &cookie)) != NULL) {
-		free(tile->pixels);
-		free(tile);
-	}
+	while ((tile = avl_destroy_nodes(&dem_tile_cache, &cookie)) != NULL)
+		free_dem_tile(tile);
 	avl_destroy(&dem_tile_cache);
 	mutex_destroy(&dem_tile_cache_lock);
 
@@ -746,6 +593,11 @@ terr_fini(void)
 	avl_destroy(&tnlc);
 
 	mutex_destroy(&glob_pos_lock);
+
+	if (DEM_prog != 0) {
+		glDeleteProgram(DEM_prog);
+		DEM_prog = 0;
+	}
 
 	free(xpdir);
 }
@@ -831,7 +683,6 @@ terr_get_elev_wide(geo_pos2_t pos)
 					elev = e;
 			}
 		}
-		
 	}
 	mutex_exit(&dem_tile_cache_lock);
 
@@ -841,47 +692,157 @@ terr_get_elev_wide(geo_pos2_t pos)
 	return (elev);
 }
 
-egpws_terr_tile_set_t *
-terr_get_tile_set(void)
+static void
+update_tiles(void)
 {
-	/* On the main thread we can do all of our OpenGL calls */
-	mutex_enter(&terr_tile_set.lock);
-	for (egpws_terr_tile_t *tile = avl_first(&terr_tile_set.tiles),
-	    *next_tile = NULL; tile != NULL; tile = next_tile) {
-		next_tile = AVL_NEXT(&terr_tile_set.tiles, tile);
+	mutex_enter(&dem_tile_cache_lock);
+
+	for (dem_tile_t *tile = avl_first(&dem_tile_cache), *next_tile = NULL;
+	    tile != NULL; tile = next_tile) {
+		int next_tex = !tile->cur_tex;
+
+		next_tile = AVL_NEXT(&dem_tile_cache, tile);
 
 		if (tile->remove) {
-			dbg_log(painter, 1, "free tile %d x %d",
-			    tile->lat, tile->lon);
-			avl_remove(&terr_tile_set.tiles, tile);
-			if (tile->tex != 0)
-				glDeleteTextures(1, &tile->tex);
-			free(tile);
+			avl_remove(&dem_tile_cache, tile);
+			free_dem_tile(tile);
 			continue;
 		}
-		if (tile->dirty) {
-			dbg_log(painter, 2, "upload tile %d x %d  "
-			    "(%dpx x %dpx)", tile->lat, tile->lon,
-			    tile->pix_width, tile->pix_height);
-			if (tile->tex == 0) {
-				dbg_log(painter, 2, "tex alloc tile %d x %d",
-				    tile->lat, tile->lon);
-				glGenTextures(1, &tile->tex);
-				XPLMBindTexture2d(tile->tex, GL_TEXTURE_2D);
-				glTexParameteri(GL_TEXTURE_2D,
-				    GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-				glTexParameteri(GL_TEXTURE_2D,
-				    GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-			}
-			ASSERT(tile->pixels != NULL);
-			XPLMBindTexture2d(tile->tex, GL_TEXTURE_2D);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tile->pix_width,
-			    tile->pix_height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-			    tile->pixels);
-			tile->dirty = B_FALSE;
+		if (tile->empty || !tile->dirty)
+			continue;
+		if (tile->tex[next_tex] == 0) {
+			glGenTextures(1, &tile->tex[next_tex]);
+			XPLMBindTexture2d(tile->tex[next_tex], GL_TEXTURE_2D);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+			    GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+			    GL_NEAREST);
 		}
-	}
-	mutex_exit(&terr_tile_set.lock);
+		if (tile->pbo == 0)
+			glGenBuffers(1, &tile->pbo);
 
-	return (&terr_tile_set);
+		glBindBuffer(GL_PIXEL_UNPACK_BUFFER, tile->pbo);
+
+		unsigned long long start, end;
+		start = microclock();
+
+		if (tile->in_flight == 0) {
+			size_t sz = tile->pix_width * tile->pix_height *
+			    sizeof (*tile->pixels);
+			void *ptr;
+
+			glBufferData(GL_PIXEL_UNPACK_BUFFER, sz, 0,
+			    GL_STREAM_DRAW);
+			ptr = glMapBuffer(GL_PIXEL_UNPACK_BUFFER,
+			    GL_WRITE_ONLY);
+			if (ptr == NULL) {
+				logMsg("Error updating tile %d x %d: "
+				    "glMapBuffer returned NULL", tile->lat,
+				    tile->lon);
+				glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+				continue;
+			}
+			memcpy(ptr, tile->pixels, sz);
+
+			glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+			tile->in_flight =
+			    glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+
+			end = microclock();
+			printf("Upload set up, took: %llu\n", end - start);
+		} else if (glClientWaitSync(tile->in_flight, 0, 0) !=
+		    GL_TIMEOUT_EXPIRED) {
+			XPLMBindTexture2d(tile->tex[next_tex], GL_TEXTURE_2D);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RG, tile->pix_width,
+			    tile->pix_height, 0, GL_RG, GL_UNSIGNED_BYTE, NULL);
+
+			tile->dirty = B_FALSE;
+			tile->in_flight = B_FALSE;
+
+			end = microclock();
+			printf("Texture applied, took: %llu\n", end - start);
+			tile->in_flight = 0;
+			tile->cur_tex = next_tex;
+		}
+
+		glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+	}
+
+	mutex_exit(&dem_tile_cache_lock);
+}
+
+static void
+draw_tiles(const egpws_render_t *render)
+{
+	fpp_t fpp = ortho_fpp_init(GEO3_TO_GEO2(render->position),
+	    render->rotation, &wgs84, B_FALSE);
+	const egpws_conf_t *conf = egpws_get_conf();
+
+	XPLMSetGraphicsState(0, 1, 0, 1, 1, 1, 1);
+
+	mutex_enter(&dem_tile_cache_lock);
+	for (dem_tile_t *tile = avl_first(&dem_tile_cache);
+	    tile != NULL; tile = AVL_NEXT(&dem_tile_cache, tile)) {
+		vect2_t v[4];
+		vect2_t t[4] = {
+		    VECT2(0, 0), VECT2(0, 1), VECT2(1, 1), VECT2(1, 0)
+		};
+		GLfloat hgt_rngs_ft[4 * 2];
+		GLfloat hgt_colors[4 * 4];
+
+		if (tile->cur_tex == -1)
+			continue;
+
+		v[0] = geo2fpp(GEO_POS2(tile->lat, tile->lon), &fpp);
+		v[1] = geo2fpp(GEO_POS2(tile->lat + 1, tile->lon), &fpp);
+		v[2] = geo2fpp(GEO_POS2(tile->lat + 1, tile->lon + 1), &fpp);
+		v[3] = geo2fpp(GEO_POS2(tile->lat, tile->lon + 1), &fpp);
+
+		for (int i = 0; i < 4; i++) {
+			v[i] = vect2_add(vect2_scmul(v[i], render->scale),
+			    render->offset);
+		}
+
+		glActiveTexture(GL_TEXTURE0);
+		XPLMBindTexture2d(tile->tex[tile->cur_tex], GL_TEXTURE_2D);
+
+		glUseProgram(DEM_prog);
+
+		glUniform1i(glGetUniformLocation(DEM_prog, "tex"), 0);
+		glUniform1f(glGetUniformLocation(DEM_prog, "acf_elev_ft"),
+		    MET2FEET(glob_pos.elev));
+
+		for (int i = 0; i < 4; i++) {
+			const egpws_terr_color_t *color = &conf->terr_colors[i];
+			hgt_rngs_ft[i * 2] = MET2FEET(color->min_hgt);
+			hgt_rngs_ft[i * 2 + 1] = MET2FEET(color->max_hgt);
+			for (int j = 0; j < 4; j++)
+				hgt_colors[i * 4 + j] = color->rgba[j];
+		}
+		glUniform2fv(glGetUniformLocation(DEM_prog, "hgt_rngs_ft"),
+		    4 * 2, hgt_rngs_ft);
+		glUniform4fv(glGetUniformLocation(DEM_prog, "hgt_colors"),
+		    4 * 4, hgt_colors);
+
+		glBegin(GL_QUADS);
+		for (int i = 0; i < 4; i++) {
+			glTexCoord2f(t[i].x, t[i].y);
+			glVertex2f(v[i].x, v[i].y);
+		}
+		glEnd();
+	}
+	mutex_exit(&dem_tile_cache_lock);
+
+	glUseProgram(0);
+}
+
+void
+terr_render(const egpws_render_t *render)
+{
+	ASSERT(inited);
+
+	update_tiles();
+
+	if (render->do_draw)
+		draw_tiles(render);
 }

@@ -47,7 +47,7 @@
 #define	EARTH_CIRC		(2 * EARTH_MSL * M_PI)	/* meters */
 #define	TILE_HEIGHT		(EARTH_CIRC / 360.0)	/* meters */
 #define	MAX_LAT			80			/* degrees */
-#define	MIN_RES			108000			/* meters */
+#define	MIN_RES			2500			/* meters */
 #define	MAX_RES			108			/* meters */
 #define	MIN_RNG			5000			/* meters */
 #define	DFL_RNG			50000			/* meters */
@@ -255,7 +255,7 @@ render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
 	mutex_exit(&dem_tile_cache_lock);
 }
 
-static void
+static int
 load_dem_tile(int lat, int lon, double load_res)
 {
 	dem_tile_t srch = { .lat = lat, .lon = lon };
@@ -267,9 +267,10 @@ load_dem_tile(int lat, int lon, double load_res)
 	mutex_enter(&dem_tile_cache_lock);
 	tile = avl_find(&dem_tile_cache, &srch, NULL);
 	if (tile != NULL && tile->remove) {
+		int bytes = tile->pix_width * tile->pix_height * 2;
 		/* Tile being removed, don't touch it until it is gone */
 		mutex_exit(&dem_tile_cache_lock);
-		return;
+		return (bytes);
 	}
 	mutex_exit(&dem_tile_cache_lock);
 
@@ -277,8 +278,9 @@ load_dem_tile(int lat, int lon, double load_res)
 
 	if (tile != NULL &&
 	    (tile->empty || tile->dirty || tile->load_res == load_res)) {
+		int bytes = tile->pix_width * tile->pix_height * 2;
 		tile->seen = B_TRUE;
-		return;
+		return (bytes);
 	}
 
 	if (tile == NULL) {
@@ -315,44 +317,51 @@ load_dem_tile(int lat, int lon, double load_res)
 		dsf_fini(dsf);
 
 	tile->seen = B_TRUE;
+
+	return (tile->pix_width * tile->pix_height * 2);
 }
 
 static double
-select_tile_res(geo_pos3_t pos, int tile_lat, int tile_lon)
+select_tile_res(geo_pos3_t pos, int tile_lat, int tile_lon, fpp_t fpp)
 {
-	int lat = floor(pos.lat);
-	int lon = floor(pos.lon);
-	vect3_t tile_ecef, my_ecef;
 	double dist;
 	const egpws_range_t *rngs = ranges;
+	vect2_t tile_poly[5];
+	vect2_t tile_ctr, isect;
 
-	/*
-	 * Tiles within 1 degree of our position are always loaded at
-	 * maximum resolution to. The terrain avoidance algorithm needs
-	 * this precision. The remaining tiles are for display only, so
-	 * a lower resolution is safe to use.
-	 */
-	if (ABS(tile_lat - lat) <= 1 && ABS(tile_lon - lon) <= 1) {
-		dbg_log(tile, 2, "tile res +-1 %d x %d = max", tile_lat,
-		    tile_lon);
+	/* The tile we are in is always loaded at maximum resolution. */
+	if (tile_lat <= pos.lat && tile_lat + 1 >= pos.lat &&
+	    tile_lon <= pos.lon && tile_lon + 1 >= pos.lon)
 		return (MAX_RES);
-	}
 
-	tile_ecef = geo2ecef(GEO_POS3(tile_lat + 0.5, tile_lon + 0.5, 0),
-	    &wgs84);
-	my_ecef = geo2ecef(GEO_POS3(pos.lat, pos.lon, 0), &wgs84);
-	dist = vect3_abs(vect3_sub(tile_ecef, my_ecef));
+	tile_poly[0] = geo2fpp(GEO_POS2(tile_lat, tile_lon), &fpp);
+	tile_poly[1] = geo2fpp(GEO_POS2(tile_lat + 1, tile_lon), &fpp);
+	tile_poly[2] = geo2fpp(GEO_POS2(tile_lat + 1, tile_lon + 1), &fpp);
+	tile_poly[3] = geo2fpp(GEO_POS2(tile_lat, tile_lon + 1), &fpp);
+	tile_poly[4] = tile_poly[0];
+	tile_ctr = geo2fpp(GEO_POS2(tile_lat + 0.5, tile_lon + 0.5), &fpp);
+
+	for (int i = 0; i < 4; i++) {
+		isect = vect2vect_isect(tile_ctr, ZERO_VECT2,
+		    vect2_sub(tile_poly[i + 1], tile_poly[i]), tile_poly[i],
+		    B_TRUE);
+		if (!IS_NULL_VECT(isect))
+			break;
+	}
+	ASSERT(!IS_NULL_VECT(isect));
+	dist = vect2_abs(isect);
+
 	for (int i = 0; !isnan(rngs[i].range); i++) {
 		if (dist < rngs[i].range) {
-			dbg_log(tile, 2, "tile res %d x %d = %.0f",
-			    tile_lat, tile_lon, rngs[i].resolution);
+			dbg_log(tile, 2, "tile res %d x %d (dist: %.0f) = %.0f",
+			    tile_lat, tile_lon, dist, rngs[i].resolution);
 			return (rngs[i].resolution);
 		}
 	}
 
-	dbg_log(tile, 2, "tile res fallback %d x %d = max", tile_lat, tile_lon);
+	dbg_log(tile, 2, "tile res fallback %d x %d = min", tile_lat, tile_lon);
 
-	return (MAX_RES);
+	return (MIN_RES);
 }
 
 static void
@@ -362,6 +371,8 @@ load_nrst_dem_tiles(geo_pos3_t pos)
 	int h_tiles, v_tiles;
 	const egpws_range_t *rngs = ranges;
 	double rng = MIN_RNG;
+	fpp_t fpp = stereo_fpp_init(GEO3_TO_GEO2(pos), 0, &wgs84, B_FALSE);
+	int n_tiles = 0, bytes;
 
 	for (int i = 0; !isnan(rngs[i].range); i++)
 		rng = MAX(rng, rngs[i].range);
@@ -382,10 +393,12 @@ load_nrst_dem_tiles(geo_pos3_t pos)
 			if (!load_dem_worker_wk.run)
 				return;
 
-			res = select_tile_res(pos, tile_lat, tile_lon);
-			load_dem_tile(tile_lat, tile_lon, res);
+			res = select_tile_res(pos, tile_lat, tile_lon, fpp);
+			bytes += load_dem_tile(tile_lat, tile_lon, res);
+			n_tiles++;
 		}
 	}
+	dbg_log(tile, 1, "loaded %d tiles, total %d MB", n_tiles, bytes >> 20);
 }
 
 static void
@@ -723,9 +736,6 @@ update_tiles(void)
 
 		glBindBuffer(GL_PIXEL_UNPACK_BUFFER, tile->pbo);
 
-		unsigned long long start, end;
-		start = microclock();
-
 		if (tile->in_flight == 0) {
 			size_t sz = tile->pix_width * tile->pix_height *
 			    sizeof (*tile->pixels);
@@ -747,9 +757,6 @@ update_tiles(void)
 			glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
 			tile->in_flight =
 			    glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-
-			end = microclock();
-			printf("Upload set up, took: %llu\n", end - start);
 		} else if (glClientWaitSync(tile->in_flight, 0, 0) !=
 		    GL_TIMEOUT_EXPIRED) {
 			XPLMBindTexture2d(tile->tex[next_tex], GL_TEXTURE_2D);
@@ -757,10 +764,6 @@ update_tiles(void)
 			    tile->pix_height, 0, GL_RG, GL_UNSIGNED_BYTE, NULL);
 
 			tile->dirty = B_FALSE;
-			tile->in_flight = B_FALSE;
-
-			end = microclock();
-			printf("Texture applied, took: %llu\n", end - start);
 			tile->in_flight = 0;
 			tile->cur_tex = next_tex;
 		}

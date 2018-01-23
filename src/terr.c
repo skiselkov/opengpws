@@ -667,34 +667,45 @@ terr_get_elev(geo_pos2_t pos)
 }
 
 double
-terr_get_elev_wide(geo_pos2_t pos)
+terr_get_elev_wide(geo_pos2_t pos, geo_pos3_t terr_pos[9])
 {
 	double elev = NAN;
 	dem_tile_t srch = { .lat = floor(pos.lat), .lon = floor(pos.lon) };
 	dem_tile_t *tile;
+	int x, y, i;
 
 	mutex_enter(&dem_tile_cache_lock);
 	tile = avl_find(&dem_tile_cache, &srch, NULL);
-	if (tile != NULL && !tile->empty) {
-		int x = clampi((pos.lon - tile->lon) * tile->pix_width,
-		    0, tile->pix_width - 1);
-		int y = clampi((pos.lat - tile->lat) * tile->pix_height,
-		    0, tile->pix_height - 1);
+	if (tile == NULL || tile->empty) {
+		dbg_log(terr, 3, "get elev (%.4fx%.4f) = nan\n",
+		    pos.lat, pos.lon);
+		mutex_exit(&dem_tile_cache_lock);
+		return (NAN);
+	}
 
-		for (int xi = -1; xi <= 1; xi++) {
-			for (int yi = -1; yi <= 1; yi++) {
-				int xx = clampi(x + xi, 0,
-				    tile->pix_width - 1);
-				int yy = clampi(y + yi, 0,
-				    tile->pix_height - 1);
-				double e =
-				    tile->pixels[yy * tile->pix_width + xx];
+	x = clampi(round((pos.lon - tile->lon) * tile->pix_width),
+	    0, tile->pix_width - 1);
+	y = clampi(round((pos.lat - tile->lat) * tile->pix_height),
+	    0, tile->pix_height - 1);
+	i = 0;
 
-				if (isnan(elev))
-					elev = e;
-				else if (e > elev)
-					elev = e;
+	for (int xi = -1; xi <= 1; xi++) {
+		for (int yi = -1; yi <= 1; yi++) {
+			int xx = clampi(x + xi, 0, tile->pix_width - 1);
+			int yy = clampi(y + yi, 0, tile->pix_height - 1);
+			double e = tile->pixels[yy * tile->pix_width + xx];
+
+			if (terr_pos != NULL) {
+				terr_pos[i++] = GEO_POS3(
+				    tile->lat + ((double)yy / tile->pix_height),
+				    tile->lon + ((double)xx / tile->pix_width),
+				    e);
 			}
+
+			if (isnan(elev))
+				elev = e;
+			else if (e > elev)
+				elev = e;
 		}
 	}
 	mutex_exit(&dem_tile_cache_lock);

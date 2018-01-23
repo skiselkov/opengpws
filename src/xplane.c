@@ -371,6 +371,10 @@ XPluginReceiveMessage(XPLMPluginID from, int msg, void *param)
 		VERIFY(booted);
 		snd_sys_set_inh((bool_t)(uintptr_t)param);
 		break;
+	case EGPWS_GET_IMPACT_POINTS:
+		VERIFY(booted);
+		egpws_get_impact_points(param);
+		break;
 	}
 }
 

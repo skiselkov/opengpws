@@ -60,6 +60,7 @@ static struct {
 	bool_t			flaps_ovrd;	/* atomic */
 	double			d_trk;		/* rate of change of trk */
 	double			last_pos_update; /* time (in seconds) */
+	egpws_impact_t		imp;		/* impact points */
 } glob_data;
 
 static struct {
@@ -345,9 +346,29 @@ tawsb_dest_dist(const egpws_pos_t *pos, const egpws_arpt_ref_t *dest,
 }
 
 static void
+clear_impact(void)
+{
+	mutex_enter(&glob_data.lock);
+	memset(&glob_data.imp, 0, sizeof (glob_data.imp));
+	mutex_exit(&glob_data.lock);
+}
+
+static int
+xfer_imp_pts(geo_pos3_t imp_pts[9], geo_pos3_t terr_pos[9],  double acf_elev,
+    double clr)
+{
+	int num_pts = 0;
+	for (int i = 0; i < 9; i++) {
+		if (acf_elev - terr_pos[i].elev < clr)
+			imp_pts[num_pts++] = terr_pos[i];
+	}
+	return (num_pts);
+}
+
+static void
 tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 {
-#define	RTC_SIM_STEP		RUN_INTVAL
+#define	RTC_SIM_STEP		1			/* second */
 #define	RTC_NUM_STEPS_MAX	(45 / RTC_SIM_STEP)	/* simulate 35s */
 #define	RTC_NUM_STEPS_MIN	(30 / RTC_SIM_STEP)	/* simulate 20s */
 #define	RTC_WARN_STEP_FRACT	0.8
@@ -357,6 +378,7 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 #define	RTC_INH_HGT_THRESH	FEET2MET(200)
 #define	RTC_CAUT_INTVAL		5			/* seconds */
 #define	RTC_RISING_TERR_THRESH	FEET2MET(150)
+#define	MIN_IMPACT_PTS		5
 
 	static const vect2_t lvl_curve[] = {
 		VECT2(0,		0),
@@ -387,11 +409,16 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 	int num_sim_steps = wavg(RTC_NUM_STEPS_MAX, RTC_NUM_STEPS_MIN,
 	    iter_fract(ABS(d_trk), 0, RTC_MAX_D_TRK_RATE, B_TRUE));
 	double hgt_samples[num_sim_steps];
+	geo_pos3_t terr_pos[num_sim_steps * 9];
+	geo_pos3_t imp_pts[18];
+	int num_imp_pts = 0;
 	bool_t caut_found = B_FALSE, warn_found = B_FALSE;
 	double min_hgt = 1e10;
 
-	if (pos->on_gnd)
+	if (pos->on_gnd) {
+		clear_impact();
 		return;
+	}
 
 	if (!tawsb_nearest_arpt_or_rwy(pos, &arpt_dist, &arpt_hgt)) {
 		arpt_dist = 1e10;
@@ -399,8 +426,10 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 	}
 
 	/* Inihibit within 0.5 NM and less than 200 ft above destination */
-	if (arpt_dist < RTC_INH_DIST_THRESH && arpt_hgt < RTC_INH_HGT_THRESH)
+	if (arpt_dist < RTC_INH_DIST_THRESH && arpt_hgt < RTC_INH_HGT_THRESH) {
+		clear_impact();
 		return;
+	}
 
 	if (pos->vs > RTC_DES_THRESH)
 		rqd_clr = fx_lin_multi(arpt_dist, lvl_curve, B_FALSE);
@@ -416,7 +445,7 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 
 	for (int i = 0; i < num_sim_steps; i++) {
 		geo_pos2_t gp = fpp2geo(p, &fpp);
-		double terr_elev = terr_get_elev_wide(gp);
+		double terr_elev = terr_get_elev_wide(gp, &terr_pos[i * 9]);
 		vect2_t vel;
 
 		ASSERT(!IS_NULL_GEO_POS(gp));
@@ -437,11 +466,36 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 	for (int i = 0; i < num_sim_steps; i++) {
 		if (i < num_sim_steps * RTC_WARN_STEP_FRACT &&
 		    hgt_samples[i] < coll_clr) {
+			num_imp_pts = xfer_imp_pts(imp_pts, &terr_pos[i * 9],
+			    pos->pos.elev, coll_clr);
+			/*
+			 * Sometimes the first hit generates very few impact
+			 * points. In that case, check the next step, to see
+			 * if we can grab some more.
+			 */
+			if (num_imp_pts < MIN_IMPACT_PTS &&
+			    i + 1 < num_sim_steps) {
+				num_imp_pts += xfer_imp_pts(
+				    &imp_pts[num_imp_pts], &terr_pos[i * 9],
+				    pos->pos.elev, coll_clr);
+			}
 			warn_found = B_TRUE;
 			break;
 		}
-		if (hgt_samples[i] < rqd_clr)
+		if (hgt_samples[i] < rqd_clr) {
+			if (!caut_found) {
+				num_imp_pts = xfer_imp_pts(imp_pts,
+				    &terr_pos[i * 9], pos->pos.elev, rqd_clr);
+				if (num_imp_pts < MIN_IMPACT_PTS &&
+				    i + 1 < num_sim_steps) {
+					num_imp_pts += xfer_imp_pts(
+					    &imp_pts[num_imp_pts],
+					    &terr_pos[i * 9], pos->pos.elev,
+					    coll_clr);
+				}
+			}
 			caut_found = B_TRUE;
+		}
 		min_hgt = MIN(min_hgt, hgt_samples[i]);
 	}
 
@@ -476,6 +530,11 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 		    min_hgt, rqd_clr, coll_clr);
 		state.tawsb.rtc.ahead_played = B_FALSE;
 	}
+
+	mutex_enter(&glob_data.lock);
+	glob_data.imp.num_points = num_imp_pts;
+	memcpy(&glob_data.imp.points, imp_pts, num_imp_pts * sizeof (*imp_pts));
+	mutex_exit(&glob_data.lock);
 }
 
 /*
@@ -689,8 +748,10 @@ tawsb(const egpws_pos_t *pos, const egpws_arpt_ref_t *dest, double d_trk)
 	double dest_dist, dest_hgt;
 
 	/* TAWS-B needs position */
-	if (IS_NULL_GEO_POS(pos->pos))
+	if (IS_NULL_GEO_POS(pos->pos)) {
+		clear_impact();
 		return;
+	}
 
 	tawsb_dest_dist(pos, dest, &dest_dist, &dest_hgt);
 	tawsb_edr(pos);
@@ -860,4 +921,12 @@ egpws_get_advisory(void)
 	mutex_exit(&state.adv_lock);
 
 	return (adv);
+}
+
+void
+egpws_get_impact_points(egpws_impact_t *imp)
+{
+	mutex_enter(&glob_data.lock);
+	memcpy(imp, &glob_data.imp, sizeof (*imp));
+	mutex_exit(&glob_data.lock);
 }

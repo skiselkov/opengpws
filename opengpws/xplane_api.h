@@ -120,6 +120,11 @@ typedef enum {
 	EGPWS_ADVISORY_PULL_UP
 } egpws_advisory_t;
 
+typedef struct {
+	int		num_points;
+	geo_pos3_t	points[32];
+} egpws_impact_t;
+
 enum {
 	EGPWS_SET_STATE =	0x100000,	/* bool_t param */
 	EGPWS_SET_FLAPS_OVRD,			/* bool_t param */
@@ -132,7 +137,8 @@ enum {
 	EGPWS_SET_RANGES,			/* egpws_range_t ptr param */
 	EGPWS_TERR_RENDER,			/* egpws_render_t * param */
 	EGPWS_GET_ADVISORY,			/* egpws_advisory_t * param */
-	EGPWS_SET_SOUND_INH			/* bool_t param */
+	EGPWS_SET_SOUND_INH,			/* bool_t param */
+	EGPWS_GET_IMPACT_POINTS			/* egpws_impact_t param */
 };
 
 #ifdef __cplusplus

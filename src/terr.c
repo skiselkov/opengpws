@@ -322,17 +322,12 @@ load_dem_tile(int lat, int lon, double load_res)
 }
 
 static double
-select_tile_res(geo_pos3_t pos, int tile_lat, int tile_lon, fpp_t fpp)
+select_tile_res(int tile_lat, int tile_lon, fpp_t fpp)
 {
 	double dist;
 	const egpws_range_t *rngs = ranges;
 	vect2_t tile_poly[5];
 	vect2_t tile_ctr, isect;
-
-	/* The tile we are in is always loaded at maximum resolution. */
-	if (tile_lat <= pos.lat && tile_lat + 1 >= pos.lat &&
-	    tile_lon <= pos.lon && tile_lon + 1 >= pos.lon)
-		return (MAX_RES);
 
 	tile_poly[0] = geo2fpp(GEO_POS2(tile_lat, tile_lon), &fpp);
 	tile_poly[1] = geo2fpp(GEO_POS2(tile_lat + 1, tile_lon), &fpp);
@@ -348,8 +343,11 @@ select_tile_res(geo_pos3_t pos, int tile_lat, int tile_lon, fpp_t fpp)
 		if (!IS_NULL_VECT(isect))
 			break;
 	}
-	ASSERT(!IS_NULL_VECT(isect));
-	dist = vect2_abs(isect);
+	if (!IS_NULL_VECT(isect))
+		dist = vect2_abs(isect);
+	else
+		/* we must be inside the tile */
+		dist = 0;
 
 	for (int i = 0; !isnan(rngs[i].range); i++) {
 		if (dist < rngs[i].range) {
@@ -393,7 +391,7 @@ load_nrst_dem_tiles(geo_pos3_t pos)
 			if (!load_dem_worker_wk.run)
 				return;
 
-			res = select_tile_res(pos, tile_lat, tile_lon, fpp);
+			res = select_tile_res(tile_lat, tile_lon, fpp);
 			bytes += load_dem_tile(tile_lat, tile_lon, res);
 			n_tiles++;
 		}

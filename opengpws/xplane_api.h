@@ -116,9 +116,10 @@ typedef struct {
 
 typedef enum {
 	EGPWS_ADVISORY_NONE,
-	EGPWS_ADVISORY_SINKRATE,
-	EGPWS_ADVISORY_TERRAIN,
-	EGPWS_ADVISORY_PULL_UP
+	EGPWS_ADVISORY_SINKRATE_DR,	/* Caused by descent rate */
+	EGPWS_ADVISORY_PULL_UP_DR,	/* Caused by descent rate */
+	EGPWS_ADVISORY_TERRAIN,		/* Caused by proximity to terrain */
+	EGPWS_ADVISORY_PULL_UP		/* Caused by proximity to terrain */
 } egpws_advisory_t;
 
 typedef struct {

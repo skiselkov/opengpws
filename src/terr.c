@@ -370,7 +370,7 @@ load_nrst_dem_tiles(geo_pos3_t pos)
 	const egpws_range_t *rngs = ranges;
 	double rng = MIN_RNG;
 	fpp_t fpp = stereo_fpp_init(GEO3_TO_GEO2(pos), 0, &wgs84, B_FALSE);
-	int n_tiles = 0, bytes;
+	int n_tiles = 0, bytes = 0;
 
 	for (int i = 0; !isnan(rngs[i].range); i++)
 		rng = MAX(rng, rngs[i].range);

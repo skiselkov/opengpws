@@ -809,8 +809,10 @@ void
 egpws_init(const egpws_conf_t *acf_conf)
 {
 	ASSERT(!inited);
-
 	inited = B_TRUE;
+
+	memset(&state, 0, sizeof (state));
+
 	main_shutdown = B_FALSE;
 	mutex_init(&lock);
 	cv_init(&cv);
@@ -821,8 +823,6 @@ egpws_init(const egpws_conf_t *acf_conf)
 	mutex_init(&glob_data.lock);
 	mutex_init(&state.adv_lock);
 	glob_data.pos.pos = NULL_GEO_POS3;
-
-	memset(&state, 0, sizeof (state));
 
 	dbg_log(egpws, 3, "EGPWS type: %s",
 	    conf.type == EGPWS_MK_VIII ? "MK VIII" : "TAWS-B");
@@ -916,6 +916,7 @@ egpws_get_advisory(void)
 {
 	egpws_advisory_t adv;
 
+	ASSERT(inited);
 	mutex_enter(&state.adv_lock);
 	adv = state.adv;
 	mutex_exit(&state.adv_lock);
@@ -926,6 +927,7 @@ egpws_get_advisory(void)
 void
 egpws_get_impact_points(egpws_impact_t *imp)
 {
+	ASSERT(inited);
 	mutex_enter(&glob_data.lock);
 	memcpy(imp, &glob_data.imp, sizeof (*imp));
 	mutex_exit(&glob_data.lock);

@@ -77,7 +77,7 @@ win32:contains(CROSS_COMPILE, x86_64-w64-mingw32-) {
 	    --cflags")
 
 	# This must go first for GCC to properly find dependent symbols
-	LIBS += -L$$[LIBACFUTILS]/qmake/win64 -lacfutils
+	LIBS += -Wl,--whole-archive $$[LIBACFUTILS]/qmake/win64/libacfutils.a
 	LIBS += $$system("$$[LIBACFUTILS]/pkg-config-deps win-64 --libs")
 
 	LIBS += -L$$[LIBACFUTILS]/SDK/Libraries/Win -lXPLM_64
@@ -92,7 +92,7 @@ win32:contains(CROSS_COMPILE, i686-w64-mingw32-) {
 	QMAKE_CFLAGS += $$system("$$[LIBACFUTILS]/pkg-config-deps win-32 \
 	    --cflags")
 
-	LIBS += -L$$[LIBACFUTILS]/qmake/win32 -lacfutils
+	LIBS += -Wl,--whole-archive $$[LIBACFUTILS]/qmake/win32/libacfutils.a
 	LIBS += $$system("$$[LIBACFUTILS]/pkg-config-deps win-32 --libs")
 
 	LIBS += -L$$[LIBACFUTILS]/SDK/Libraries/Win -lXPLM
@@ -115,7 +115,7 @@ linux-g++-64 {
 	QMAKE_CFLAGS += $$system("$$[LIBACFUTILS]/pkg-config-deps linux-64 \
 	    --cflags")
 
-	LIBS += -L$$[LIBACFUTILS]/qmake/lin64 -lacfutils
+	LIBS += -L$$[LIBACFUTILS]/qmake/lin64/libacfutils.a
 	LIBS += $$system("$$[LIBACFUTILS]/pkg-config-deps linux-64 --libs")
 }
 
@@ -128,7 +128,7 @@ linux-g++-32 {
 	QMAKE_CFLAGS += -fno-stack-protector
 	LIBS += -fno-stack-protector
 
-	LIBS += -L$$[LIBACFUTILS]/qmake/lin32 -lacfutils
+	LIBS += $$[LIBACFUTILS]/qmake/lin32/libacfutils.a
 	LIBS += $$system("$$[LIBACFUTILS]/pkg-config-deps linux-32 --libs")
 
 	LIBS += -lssp_nonshared
@@ -156,7 +156,7 @@ macx-clang {
 	QMAKE_CFLAGS += $$system("PKG_CONFIG_PATH=../libxml2/libxml2-mac-64 \
 	    pkg-config --cflags libxml-2.0")
 
-	LIBS += -L$$[LIBACFUTILS]/qmake/mac64 -lacfutils
+	LIBS += $$[LIBACFUTILS]/qmake/mac64/libacfutils.a
 	LIBS += $$system("$$[LIBACFUTILS]/pkg-config-deps mac-64 --libs")
 
 	LIBS += $$system("PKG_CONFIG_PATH=../pcre2/pcre2-mac-64 pkg-config \
@@ -172,7 +172,7 @@ macx-clang-32 {
 	QMAKE_CFLAGS += $$system("PKG_CONFIG_PATH=../libxml2/libxml2-mac-32 \
 	    pkg-config --cflags libxml-2.0")
 
-	LIBS += -L$$[LIBACFUTILS]/qmake/mac32 -lacfutils
+	LIBS += $$[LIBACFUTILS]/qmake/mac32/libacfutils.a
 	LIBS += $$system("$$[LIBACFUTILS]/pkg-config-deps mac-32 --libs")
 
 	LIBS += $$system("PKG_CONFIG_PATH=../pcre2/pcre2-mac-32 pkg-config \

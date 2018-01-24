@@ -20,7 +20,7 @@ else
 	    "$OUTPUT_DIR/mac_x64/${OUTPUT_DIR}.xpl"
 fi
 
-find data -iname '*.opus' | while read; do
+find data -iname '*.opus' -or -iname '*.glsl' | while read; do
 	$INSTALL -- "$REPLY" "$OUTPUT_DIR/$REPLY"
 done
 

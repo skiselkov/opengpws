@@ -116,6 +116,7 @@ typedef struct {
 
 typedef enum {
 	EGPWS_ADVISORY_NONE,
+	EGPWS_ADVISORY_SINKRATE,
 	EGPWS_ADVISORY_TERRAIN,
 	EGPWS_ADVISORY_PULL_UP
 } egpws_advisory_t;

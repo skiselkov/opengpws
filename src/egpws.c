@@ -171,7 +171,7 @@ mk8_mode1(const egpws_pos_t *pos)
 		    next_caut_vs > state.mk8.mode1.last_caut_vs) {
 			state.mk8.mode1.last_caut_vs = next_caut_vs;
 			sched_sound(SND_SINKRATE);
-			state.adv = MAX(state.adv, EGPWS_ADVISORY_TERRAIN);
+			state.adv = MAX(state.adv, EGPWS_ADVISORY_SINKRATE);
 		}
 	} else {
 		state.mk8.mode1.last_caut_vs = 0;
@@ -229,13 +229,13 @@ tawsb_edr(const egpws_pos_t *pos)
 			dbg_log(egpws, 2, "edr| lo_caut");
 			state.tawsb.edr.lo_caut = B_TRUE;
 			sched_sound(SND_SINKRATE);
-			state.adv = MAX(state.adv, EGPWS_ADVISORY_TERRAIN);
+			state.adv = MAX(state.adv, EGPWS_ADVISORY_SINKRATE);
 		} else if (!state.tawsb.edr.hi_caut &&
 		    pos->vs < (caut_vs + warn_vs) / 2) {
 			dbg_log(egpws, 2, "edr| hi_caut");
 			state.tawsb.edr.hi_caut = B_TRUE;
 			sched_sound(SND_SINKRATE);
-			state.adv = MAX(state.adv, EGPWS_ADVISORY_TERRAIN);
+			state.adv = MAX(state.adv, EGPWS_ADVISORY_SINKRATE);
 		}
 	} else {
 		dbg_log(egpws, 3, "edr| clear");

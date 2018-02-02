@@ -48,6 +48,12 @@
 
 #define	SENSOR_INTVAL		0.2	/* seconds */
 
+static void set_state(const egpws_conf_t *conf);
+static void set_pos_ok(bool_t flag);
+static void set_ra_ok(bool_t flag);
+static void set_on_gnd_ok(bool_t flag);
+static void set_nav_on(bool_t nav1_on, bool_t nav2_on);
+
 char			xpdir[512];
 char			plugindir[512];
 
@@ -58,16 +64,16 @@ static bool_t		pos_ok = B_TRUE;	/* position acquisition OK? */
 static bool_t		ra_ok = B_TRUE;		/* radio altimeter OK? */
 static bool_t		on_gnd_ok = B_TRUE;	/* ground squat switch OK? */
 
-static dr_t		lat, lon, elev;
-static dr_t		trk;
-static dr_t		asi_kts;
-static dr_t		asi_fail;
-static dr_t		gs;
-static dr_t		vs_ft;
-static dr_t		vs_fail;
-static dr_t		ra_ft;
-static dr_t		on_gnd;
-static dr_t		loc_fail, gs_fail;
+static dr_t	lat, lon, elev;
+static dr_t	trk;
+static dr_t	asi_kts;
+static dr_t	asi_fail;
+static dr_t	gs;
+static dr_t	vs_ft;
+static dr_t	vs_fail;
+static dr_t	ra_ft;
+static dr_t	on_gnd;
+static dr_t	loc_fail, gs_fail;
 
 static struct {
 	dr_t	freq;
@@ -78,6 +84,22 @@ static struct {
 	dr_t	gs_flag;
 	bool_t	on;
 } nav1, nav2;
+
+static egpws_intf_t intf = {
+	.set_state = set_state,
+	.set_flaps_ovrd = egpws_set_flaps_ovrd,
+	.set_pos_ok = set_pos_ok,
+	.set_ra_ok = set_ra_ok,
+	.set_on_gnd_ok = set_on_gnd_ok,
+	.set_dest = egpws_set_dest,
+	.set_nav_on = set_nav_on,
+	.set_ranges = terr_set_ranges,
+	.terr_render = terr_render,
+	.get_advisory = egpws_get_advisory,
+	.set_sound_inh = snd_sys_set_inh,
+	.get_impact_pts = egpws_get_impact_points,
+	.terr_probe = terr_probe
+};
 
 static int
 sound_cb(XPLMDrawingPhase phase, int before, void *refcon)
@@ -284,6 +306,9 @@ XPluginEnable(void)
 	fdr_find(&nav1.gs_flag,
 	    "sim/cockpit2/radios/indicators/hsi_flag_glideslope_copilot");
 
+	/* We initialize this early, as OpenWXR can call us for terrain */
+	terr_init(xpdir, plugindir);
+
 	XPLMRegisterFlightLoopCallback(sensor_cb, SENSOR_INTVAL, NULL);
 	XPLMRegisterDrawCallback(sound_cb, xplm_Phase_FirstScene, 1, NULL);
 
@@ -301,80 +326,58 @@ XPluginDisable(void)
 	snd_sys_fini();
 }
 
+static void
+set_state(const egpws_conf_t *conf)
+{
+	if (conf != NULL && !booted) {
+		VERIFY(conf->terr_colors != NULL);
+		egpws_init(conf);
+		booted = B_TRUE;
+		pos_ok = B_TRUE;
+		ra_ok = B_TRUE;
+		on_gnd_ok = B_TRUE;
+	} else if (conf == NULL && booted) {
+		egpws_fini();
+		booted = B_FALSE;
+	}
+}
+
+static void
+set_pos_ok(bool_t flag)
+{
+	pos_ok = flag;
+}
+
+static void
+set_ra_ok(bool_t flag)
+{
+	ra_ok = flag;
+}
+
+static void
+set_on_gnd_ok(bool_t flag)
+{
+	on_gnd_ok = flag;
+}
+
+static void
+set_nav_on(bool_t nav1_on, bool_t nav2_on)
+{
+	nav1.on = nav1_on;
+	nav2.on = nav2_on;
+}
+
 PLUGIN_API void
 XPluginReceiveMessage(XPLMPluginID from, int msg, void *param)
 {
 	UNUSED(from);
 
 	switch (msg) {
-	case EGPWS_SET_STATE:
-		if (param != NULL && !booted) {
-			const egpws_conf_t *conf = param;
-
-			VERIFY(conf->terr_colors != NULL);
-
-			terr_init(xpdir, plugindir);
-			egpws_init(conf);
-			booted = B_TRUE;
-			pos_ok = B_TRUE;
-			ra_ok = B_TRUE;
-			on_gnd_ok = B_TRUE;
-		} else if (param == NULL && booted) {
-			egpws_fini();
-			terr_fini();
-			booted = B_FALSE;
-		}
-		break;
-	case EGPWS_SET_FLAPS_OVRD:
-		if (booted)
-			egpws_set_flaps_ovrd((uintptr_t)param);
-		break;
-	case EGPWS_SET_POS_OK:
-		pos_ok = (uintptr_t)param;
-		break;
-	case EGPWS_SET_RA_OK:
-		ra_ok = (uintptr_t)param;
-		break;
-	case EGPWS_SET_ON_GND_OK:
-		on_gnd_ok = (uintptr_t)param;
-		break;
-	case EGPWS_SET_DEST:
-		VERIFY(param != NULL);
-		if (booted)
-			egpws_set_dest(param);
-		break;
-	case EGPWS_SET_NAV1_ON:
-		nav1.on = (uintptr_t)param;
-		break;
-	case EGPWS_SET_NAV2_ON:
-		nav2.on = (uintptr_t)param;
-		break;
-	case EGPWS_SET_RANGES:
-		VERIFY(booted);
-		terr_set_ranges(param);
-		break;
-	case EGPWS_TERR_RENDER: {
-		egpws_render_t *render = param;
-		VERIFY(render != NULL);
-		VERIFY(booted);
-		terr_render(render);
+	case EGPWS_GET_INTF: {
+		egpws_intf_t **intf_p = param;
+		*intf_p = &intf;
 		break;
 	}
-	case EGPWS_GET_ADVISORY: {
-		egpws_advisory_t *adv_p = param;
-		VERIFY(adv_p != NULL);
-		VERIFY(booted);
-		*adv_p = egpws_get_advisory();
-		break;
-	}
-	case EGPWS_SET_SOUND_INH:
-		VERIFY(booted);
-		snd_sys_set_inh((bool_t)(uintptr_t)param);
-		break;
-	case EGPWS_GET_IMPACT_POINTS:
-		VERIFY(booted);
-		egpws_get_impact_points(param);
-		break;
 	}
 }
 

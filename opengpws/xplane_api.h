@@ -127,20 +127,31 @@ typedef struct {
 	geo_pos3_t	points[32];
 } egpws_impact_t;
 
+typedef struct {
+	unsigned		num_pts;
+	const geo_pos2_t	*in_pts;
+	double			*out_elev;
+	vect3_t			*out_norm;
+} egpws_terr_probe_t;
+
+typedef struct {
+	void (*set_state)(const egpws_conf_t *conf);
+	void (*set_flaps_ovrd)(bool_t flag);
+	void (*set_pos_ok)(bool_t flag);
+	void (*set_ra_ok)(bool_t flag);
+	void (*set_on_gnd_ok)(bool_t flag);
+	void (*set_dest)(const egpws_arpt_ref_t *arpt);
+	void (*set_nav_on)(bool_t nav1_on, bool_t nav2_on);
+	void (*set_ranges)(const egpws_range_t *ranges);
+	void (*terr_render)(const egpws_render_t *render);
+	egpws_advisory_t (*get_advisory)(void);
+	void (*set_sound_inh)(bool_t flag);
+	void (*get_impact_pts)(egpws_impact_t *imp);
+	void (*terr_probe)(egpws_terr_probe_t *probe);
+} egpws_intf_t;
+
 enum {
-	EGPWS_SET_STATE =	0x100000,	/* bool_t param */
-	EGPWS_SET_FLAPS_OVRD,			/* bool_t param */
-	EGPWS_SET_POS_OK,			/* bool_t param */
-	EGPWS_SET_RA_OK,			/* bool_t param */
-	EGPWS_SET_ON_GND_OK,			/* bool_t param */
-	EGPWS_SET_DEST,				/* arpt_ref_t * param */
-	EGPWS_SET_NAV1_ON,			/* bool_t param */
-	EGPWS_SET_NAV2_ON,			/* bool_t param */
-	EGPWS_SET_RANGES,			/* egpws_range_t ptr param */
-	EGPWS_TERR_RENDER,			/* egpws_render_t * param */
-	EGPWS_GET_ADVISORY,			/* egpws_advisory_t * param */
-	EGPWS_SET_SOUND_INH,			/* bool_t param */
-	EGPWS_GET_IMPACT_POINTS			/* egpws_impact_t param */
+	EGPWS_GET_INTF = 0x100000		/* egpws_intf_t * param */
 };
 
 #ifdef __cplusplus

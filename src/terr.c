@@ -858,3 +858,96 @@ terr_render(const egpws_render_t *render)
 	if (render->do_draw)
 		draw_tiles(render);
 }
+
+void
+terr_probe(egpws_terr_probe_t *probe)
+{
+	dem_tile_t *tile = NULL;
+
+	/*
+	 * OpenWXR can start asking us for terrain data early,
+	 * so just answer that we don't know anything yet.
+	 */
+	if (!inited) {
+		memset(probe->out_elev, 0, sizeof (*probe->out_elev) *
+		    probe->num_pts);
+		memset(probe->out_norm, 0, sizeof (*probe->out_norm) *
+		    probe->num_pts);
+		return;
+	}
+
+	mutex_enter(&dem_tile_cache_lock);
+
+	for (unsigned i = 0; i < probe->num_pts; i++) {
+		geo_pos2_t pos = probe->in_pts[i];
+		int tile_lat = floor(pos.lat), tile_lon = floor(pos.lon);
+		unsigned x, y;
+		double elev, elev_west, elev_east, elev_north, elev_south;
+		double dist_lat, dist_lon;
+		vect3_t norm_lat, norm_lon;
+
+		/*
+		 * Check if we can recycle the previous tile. Most probes
+		 * will tend to cluster in the same tile, so avoid having
+		 * to do multiple avl_find()s.
+		 */
+		if (tile == NULL ||
+		    tile->lat != tile_lat || tile->lon != tile_lon) {
+			dem_tile_t srch = { .lat = tile_lat, .lon = tile_lon };
+			tile = avl_find(&dem_tile_cache, &srch, NULL);
+		}
+		if (tile == NULL || tile->empty) {
+			probe->out_elev[i] = 0;
+			probe->out_norm[i] = VECT3(0, 0, 1);
+			continue;
+		}
+		ASSERT3U(tile->pix_width, >=, 3);
+		ASSERT3U(tile->pix_height, >=, 3);
+
+		x = clampi((pos.lon - tile->lon) * tile->pix_width,
+		    0, tile->pix_width - 1);
+		y = clampi((pos.lat - tile->lat) * tile->pix_height,
+		    0, tile->pix_height - 1);
+		elev = tile->pixels[y * tile->pix_width + x];
+		probe->out_elev[i] = elev;
+
+		if (x == 0) {
+			elev_east = tile->pixels[y * tile->pix_width + x + 1];
+			elev_west = elev;
+			dist_lon = tile->load_res;
+		} else if (x + 1 == tile->pix_width) {
+			elev_east = elev;
+			elev_west = tile->pixels[y * tile->pix_width + x - 1];
+			dist_lon = tile->load_res;
+		} else {
+			elev_east = tile->pixels[y * tile->pix_width + x - 1];
+			elev_west = tile->pixels[y * tile->pix_width + x + 1];
+			dist_lon = 2 * tile->load_res;
+		}
+		norm_lon = VECT3(elev_east - elev_west, 0, dist_lon);
+
+		if (y == 0) {
+			elev_north = elev;
+			elev_south =
+			    tile->pixels[(y + 1) * tile->pix_width + x];
+			dist_lat = tile->load_res;
+		} else if (y + 1 == tile->pix_height) {
+			elev_north =
+			    tile->pixels[(y - 1) * tile->pix_width + x];
+			elev_south = elev;
+			dist_lat = tile->load_res;
+		} else {
+			elev_north =
+			    tile->pixels[(y - 1) * tile->pix_width + x];
+			elev_south =
+			    tile->pixels[(y + 1) * tile->pix_width + x];
+			dist_lat = 2 * tile->load_res;
+		}
+		norm_lat = VECT3(0, elev_south - elev_north, dist_lat);
+
+		probe->out_norm[i] = vect3_unit(vect3_add(norm_lat, norm_lon),
+		    NULL);
+	}
+
+	mutex_exit(&dem_tile_cache_lock);
+}

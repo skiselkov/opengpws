@@ -33,6 +33,7 @@ void terr_set_pos(geo_pos3_t pos);
 void terr_set_ranges(const egpws_range_t *new_rngs);
 double terr_get_elev(geo_pos2_t pos);
 double terr_get_elev_wide(geo_pos2_t pos, geo_pos3_t out_pos[3]);
+void terr_probe(egpws_terr_probe_t *probe);
 
 void terr_render(const egpws_render_t *render);
 

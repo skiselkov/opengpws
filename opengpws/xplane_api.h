@@ -129,7 +129,7 @@ typedef struct {
 
 typedef struct {
 	unsigned		num_pts;
-	const geo_pos2_t	*in_pts;
+	geo_pos2_t		*in_pts;
 	double			*out_elev;
 	vect3_t			*out_norm;
 } egpws_terr_probe_t;

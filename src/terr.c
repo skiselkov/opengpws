@@ -280,11 +280,19 @@ render_water_mask(int lat, int lon, int pix_width, int pix_height)
 			else
 				end_k = obj->nVertices;
 			cairo_new_sub_path(cr);
+			/*
+			 * Note that the rendered image will be "upside down"
+			 * when viewed as a PNG. That's because cairo & PNG
+			 * address the image from the top left, but our terrain
+			 * coordinates start at the bottom left. So we flip the
+			 * Y axis, so that increasing row numbers will
+			 * correspond to increasing latitude.
+			 */
 			cairo_move_to(cr, obj->padfX[start_k] - lon,
-			    (lat + 1) - obj->padfY[start_k]);
+			    obj->padfY[start_k] - lat);
 			for (int k = start_k + 1; k < end_k; k++) {
 				cairo_line_to(cr, obj->padfX[k] - lon,
-				    (lat + 1) - obj->padfY[k]);
+				    obj->padfY[k] - lat);
 			}
 		}
 		cairo_fill(cr);

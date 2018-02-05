@@ -73,6 +73,7 @@ typedef struct {
 	bool_t		remove;		/* mark for removal */
 
 	const uint8_t	*water_mask;	/* water intensity in `pixels' above */
+	int		water_mask_stride;
 	cairo_surface_t	*water_mask_surf;
 
 	int		cur_tex;
@@ -254,8 +255,6 @@ render_water_mask(int lat, int lon, int pix_width, int pix_height)
 	surf = cairo_image_surface_create(CAIRO_FORMAT_A8, pix_width,
 	    pix_height);
 	cr = cairo_create(surf);
-	cairo_set_source_rgb(cr, 0, 0, 0);
-	cairo_paint(cr);
 	cairo_scale(cr, pix_width, pix_height);
 	cairo_set_source_rgb(cr, 1, 1, 1);
 
@@ -281,8 +280,9 @@ render_water_mask(int lat, int lon, int pix_width, int pix_height)
 			else
 				end_k = obj->nVertices;
 			cairo_new_sub_path(cr);
-			cairo_move_to(cr, obj->padfX[0], obj->padfY[0]);
-			for (int k = start_k; k < end_k; k++) {
+			cairo_move_to(cr, obj->padfX[start_k] - lon,
+			    (lat + 1) - obj->padfY[start_k]);
+			for (int k = start_k + 1; k < end_k; k++) {
 				cairo_line_to(cr, obj->padfX[k] - lon,
 				    (lat + 1) - obj->padfY[k]);
 			}
@@ -290,6 +290,7 @@ render_water_mask(int lat, int lon, int pix_width, int pix_height)
 		cairo_fill(cr);
 		SHPDestroyObject(obj);
 	}
+	cairo_surface_flush(surf);
 	cairo_destroy(cr);
 out:
 	if (shp != NULL)
@@ -344,12 +345,15 @@ render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
 	if (tile->water_mask_surf != NULL) {
 		cairo_surface_destroy(tile->water_mask_surf);
 		tile->water_mask = NULL;
+		tile->water_mask_stride = 0;
 		tile->water_mask_surf = NULL;
 	}
 	if (water_mask_surf != NULL) {
 		tile->water_mask_surf = water_mask_surf;
 		tile->water_mask =
 		    cairo_image_surface_get_data(water_mask_surf);
+		tile->water_mask_stride =
+		    cairo_image_surface_get_stride(water_mask_surf);
 	}
 	mutex_exit(&dem_tile_cache_lock);
 }
@@ -1063,7 +1067,7 @@ terr_probe(egpws_terr_probe_t *probe)
 		if (probe->out_water != NULL) {
 			if (tile->water_mask != NULL) {
 				probe->out_water[i] = tile->water_mask[y *
-				    tile->pix_width + x] / 255.0;
+				    tile->water_mask_stride + x] / 255.0;
 			} else {
 				/*
 				 * If we DO have a DEM tile, but no

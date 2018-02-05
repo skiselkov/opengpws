@@ -23,6 +23,8 @@
 #include <math.h>
 
 #include <GL/glew.h>
+#include <shapefil.h>
+#include <cairo.h>
 
 #include <XPLMGraphics.h>
 
@@ -41,6 +43,7 @@
 #include "dbg_log.h"
 #include "egpws.h"
 #include "terr.h"
+#include "xplane.h"
 
 #define	LOAD_DEM_WORKER_INTVAL	1			/* seconds */
 #define	TERR_TILE_WORKER_INTVAL	1			/* seconds */
@@ -68,6 +71,9 @@ typedef struct {
 	bool_t		empty;		/* tile contains no data */
 	bool_t		seen;		/* seen in presence check */
 	bool_t		remove;		/* mark for removal */
+
+	const uint8_t	*water_mask;	/* water intensity in `pixels' above */
+	cairo_surface_t	*water_mask_surf;
 
 	int		cur_tex;
 	GLuint		tex[2];
@@ -215,6 +221,84 @@ load_dem_dsf(int lat, int lon, const dsf_atom_t **demi_p,
 	return (NULL);
 }
 
+/*
+ * Reads the water shape file and rasterizes it into an 8-bit water mask.
+ * The pixels are the presence of water, from 0 for "no water" to 255
+ * "all water". Partway values allow for gradual coloring of shorelines.
+ */
+static cairo_surface_t *
+render_water_mask(int lat, int lon, int pix_width, int pix_height)
+{
+	char dname[16];
+	char fname[16];
+	char *path;
+	cairo_surface_t *surf = NULL;
+	cairo_t *cr;
+	SHPHandle shp;
+	int n_ent, shp_type;
+
+	snprintf(dname, sizeof (dname), "%+03.0f%+04.0f",
+	    floor(lat / 10.0) * 10.0, floor(lon / 10.0) * 10.0);
+	snprintf(fname, sizeof (fname), "%+03d%+04d.shp", lat, lon);
+	path = mkpathname(get_xpdir(), "Resources", "map data", "water",
+	    dname, fname, NULL);
+
+	shp = SHPOpen(path, "rb");
+	if (shp == NULL)
+		goto out;
+	SHPGetInfo(shp, &n_ent, &shp_type, NULL, NULL);
+	/* We only support polygons, given that that's what X-Plane uses. */
+	if (shp_type != SHPT_POLYGON)
+		goto out;
+
+	surf = cairo_image_surface_create(CAIRO_FORMAT_A8, pix_width,
+	    pix_height);
+	cr = cairo_create(surf);
+	cairo_set_source_rgb(cr, 0, 0, 0);
+	cairo_paint(cr);
+	cairo_scale(cr, pix_width, pix_height);
+	cairo_set_source_rgb(cr, 1, 1, 1);
+
+	/*
+	 * The shape file consists of a series of objects, each consisting of
+	 * a series of disconnected parts, which nicely map to cairo paths.
+	 * This is used in the shape file to cut out inset portions. So we
+	 * constract subpaths for each new part and Cairo handles all the
+	 * cutting & joining of rendered pieces of the path.
+	 */
+	for (int i = 0; i < n_ent; i++) {
+		SHPObject *obj = SHPReadObject(shp, i);
+
+		if (obj == NULL)
+			continue;
+		cairo_new_path(cr);
+		for (int j = 0; j < obj->nParts; j++) {
+			int start_k, end_k;
+
+			start_k = obj->panPartStart[j];
+			if (j + 1 < obj->nParts)
+				end_k = obj->panPartStart[j + 1];
+			else
+				end_k = obj->nVertices;
+			cairo_new_sub_path(cr);
+			cairo_move_to(cr, obj->padfX[0], obj->padfY[0]);
+			for (int k = start_k; k < end_k; k++) {
+				cairo_line_to(cr, obj->padfX[k] - lon,
+				    (lat + 1) - obj->padfY[k]);
+			}
+		}
+		cairo_fill(cr);
+		SHPDestroyObject(obj);
+	}
+	cairo_destroy(cr);
+out:
+	if (shp != NULL)
+		SHPClose(shp);
+	lacf_free(path);
+
+	return (surf);
+}
+
 static void
 render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
     const dsf_atom_t *demd)
@@ -228,6 +312,7 @@ render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
 	double dsf_scale_y = tile->load_res / dsf_res_y;
 	const uint16_t *dsf_pixels = (const uint16_t *)demd->payload;
 	int16_t *pixels;
+	cairo_surface_t *water_mask_surf = NULL;
 
 	tile->pix_width = tile_width / tile->load_res;
 	tile->pix_height = TILE_HEIGHT / tile->load_res;
@@ -249,9 +334,23 @@ render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
 			    clampi(elev, INT16_MIN, INT16_MAX);
 		}
 	}
+
+	water_mask_surf = render_water_mask(tile->lat, tile->lon,
+	    tile->pix_width, tile->pix_height);
+
 	mutex_enter(&dem_tile_cache_lock);
 	free(tile->pixels);
 	tile->pixels = pixels;
+	if (tile->water_mask_surf != NULL) {
+		cairo_surface_destroy(tile->water_mask_surf);
+		tile->water_mask = NULL;
+		tile->water_mask_surf = NULL;
+	}
+	if (water_mask_surf != NULL) {
+		tile->water_mask_surf = water_mask_surf;
+		tile->water_mask =
+		    cairo_image_surface_get_data(water_mask_surf);
+	}
 	mutex_exit(&dem_tile_cache_lock);
 }
 
@@ -262,7 +361,7 @@ load_dem_tile(int lat, int lon, double load_res)
 	dem_tile_t *tile;
 	bool_t existing;
 	dsf_t *dsf = NULL;
-	const dsf_atom_t *demi, *demd;
+	const dsf_atom_t *demi = NULL, *demd = NULL;
 
 	mutex_enter(&dem_tile_cache_lock);
 	tile = avl_find(&dem_tile_cache, &srch, NULL);
@@ -318,7 +417,8 @@ load_dem_tile(int lat, int lon, double load_res)
 
 	tile->seen = B_TRUE;
 
-	return (tile->pix_width * tile->pix_height * 2);
+	return (tile->pix_width * tile->pix_height *
+	    (2 + (tile->water_mask != NULL ? 1 : 0)));
 }
 
 static double
@@ -409,6 +509,8 @@ free_dem_tile(dem_tile_t *tile)
 	}
 	if (tile->pbo != 0)
 		glDeleteBuffers(1, &tile->pbo);
+	if (tile->water_mask_surf != NULL)
+		cairo_surface_destroy(tile->water_mask_surf);
 	free(tile->pixels);
 	free(tile);
 }
@@ -899,6 +1001,8 @@ terr_probe(egpws_terr_probe_t *probe)
 		if (tile == NULL || tile->empty) {
 			probe->out_elev[i] = 0;
 			probe->out_norm[i] = VECT3(0, 0, 1);
+			if (probe->out_water != NULL)
+				probe->out_water[i] = 1.0;
 			continue;
 		}
 		ASSERT3U(tile->pix_width, >=, 3);
@@ -947,6 +1051,15 @@ terr_probe(egpws_terr_probe_t *probe)
 
 		probe->out_norm[i] = vect3_unit(vect3_add(norm_lat, norm_lon),
 		    NULL);
+
+		if (probe->out_water != NULL) {
+			if (tile->water_mask != NULL) {
+				probe->out_water[i] = tile->water_mask[y *
+				    tile->pix_width + x] / 255.0;
+			} else {
+				probe->out_water[i] = 1.0;
+			}
+		}
 	}
 
 	mutex_exit(&dem_tile_cache_lock);

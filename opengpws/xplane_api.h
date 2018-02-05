@@ -132,6 +132,7 @@ typedef struct {
 	geo_pos2_t		*in_pts;
 	double			*out_elev;
 	vect3_t			*out_norm;
+	double			*out_water;
 } egpws_terr_probe_t;
 
 typedef struct {

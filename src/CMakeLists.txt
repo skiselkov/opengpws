@@ -110,7 +110,8 @@ if(APPLE)
 	    ${LIBACFUTILS}/cairo/cairo-mac-64/lib
 	    ${LIBACFUTILS}/zlib/zlib-mac-64/lib
 	    ${LIBACFUTILS}/libpng/libpng-mac-64/lib
-	    ${LIBACFUTILS}/lzma/qmake/mac-64)
+	    ${LIBACFUTILS}/shapelib/libshape-mac-64/lib
+	    ${LIBACFUTILS}/shapelib/libproj-mac-64/lib)
 	FIND_LIBRARY(XPLM_LIBRARY XPLM)
 	FIND_LIBRARY(XPWIDGETS_LIBRARY XPWidgets)
 	FIND_LIBRARY(OPENGL_LIBRARY OpenGL)
@@ -125,6 +126,8 @@ if(APPLE)
 	FIND_LIBRARY(LZMA_LIBRARY lzma)
 	FIND_LIBRARY(LIBPNG_LIBRARY png16)
 	FIND_LIBRARY(ZLIB_LIBRARY z)
+	FIND_LIBRARY(PROJ_LIBRARY proj)
+	FIND_LIBRARY(SHP_LIBRARY shp)
 	target_link_libraries(opengpws
 	    ${LIBACFUTILS_LIBRARY}
 	    ${OPENAL_LIBRARY}
@@ -140,6 +143,8 @@ if(APPLE)
 	    ${LIBPNG_LIBRARY}
 	    ${LZMA_LIBRARY}
 	    ${ZLIB_LIBRARY}
+	    ${SHP_LIBRARY}
+	    ${PROJ_LIBRARY}
 	    )
 else()
 	set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
@@ -152,7 +157,9 @@ else()
 	    ${LIBACFUTILS}/cairo/cairo-linux-64/lib
 	    ${LIBACFUTILS}/zlib/zlib-linux-64/lib
 	    ${LIBACFUTILS}/libpng/libpng-linux-64/lib
-	    ${LIBACFUTILS}/lzma/qmake/linux-64)
+	    ${LIBACFUTILS}/lzma/qmake/linux-64
+	    ${LIBACFUTILS}/shapelib/libshape-linux-64/lib
+	    ${LIBACFUTILS}/shapelib/libproj-linux-64/lib)
 	FIND_LIBRARY(LIBACFUTILS_LIBRARY acfutils)
 	FIND_LIBRARY(OPUSFILE_LIBRARY opusfile)
 	FIND_LIBRARY(OPUS_LIBRARY opus)
@@ -165,6 +172,8 @@ else()
 	FIND_LIBRARY(LZMA_LIBRARY lzma)
 	FIND_LIBRARY(PTHREAD_NONSHARED pthread_nonshared)
 	FIND_LIBRARY(LIBC_NONSHARED c_nonshared)
+	FIND_LIBRARY(PROJ_LIBRARY proj)
+	FIND_LIBRARY(SHP_LIBRARY shp)
 	target_link_libraries(opengpws
 	    ${LIBACFUTILS_LIBRARY}
 	    ${OPUSFILE_LIBRARY}
@@ -175,6 +184,8 @@ else()
 	    ${FREETYPE_LIBRARY}
 	    ${LIBPNG_LIBRARY}
 	    ${ZLIB_LIBRARY}
+	    ${SHP_LIBRARY}
+	    ${PROJ_LIBRARY}
 	    ${PTHREAD_NONSHARED}
 	    ${LIBC_NONSHARED}
 	    ${LZMA_LIBRARY}

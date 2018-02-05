@@ -975,6 +975,10 @@ terr_probe(egpws_terr_probe_t *probe)
 		    probe->num_pts);
 		memset(probe->out_norm, 0, sizeof (*probe->out_norm) *
 		    probe->num_pts);
+		if (probe->out_water != NULL) {
+			memset(probe->out_water, 0, sizeof (*probe->out_water) *
+			    probe->num_pts);
+		}
 		return;
 	}
 
@@ -1001,6 +1005,10 @@ terr_probe(egpws_terr_probe_t *probe)
 		if (tile == NULL || tile->empty) {
 			probe->out_elev[i] = 0;
 			probe->out_norm[i] = VECT3(0, 0, 1);
+			/*
+			 * If there is no terrain tile, then X-Plane will draw
+			 * water here. So just draw water as well.
+			 */
 			if (probe->out_water != NULL)
 				probe->out_water[i] = 1.0;
 			continue;
@@ -1057,7 +1065,14 @@ terr_probe(egpws_terr_probe_t *probe)
 				probe->out_water[i] = tile->water_mask[y *
 				    tile->pix_width + x] / 255.0;
 			} else {
-				probe->out_water[i] = 1.0;
+				/*
+				 * If we DO have a DEM tile, but no
+				 * corresponding water .shp file, then we
+				 * can't really tell what the terrain type
+				 * is. But since more than likely it's going
+				 * to be terrain, let's pretend it's all dry.
+				 */
+				probe->out_water[i] = 0.0;
 			}
 		}
 	}

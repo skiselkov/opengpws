@@ -667,7 +667,7 @@ terr_init(const char *the_xpdir, const char *plugindir)
 	    offsetof(srch_path_t, node));
 
 	worker_init(&load_dem_worker_wk, load_dem_worker,
-	    SEC2USEC(LOAD_DEM_WORKER_INTVAL), NULL);
+	    SEC2USEC(LOAD_DEM_WORKER_INTVAL), NULL, "OpenGPWS_terr_wk");
 
 	vtx_prog_path = mkpathname(xpdir, plugindir, "data", "DEM_vtx.glsl",
 	    NULL);

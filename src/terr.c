@@ -57,6 +57,10 @@
 #define	MAX_RNG			600000			/* meters */
 #define	ALT_QUANT_STEP		FEET2MET(20)		/* quantization step */
 
+#define	ELEV_V_OFF		10000			/* meters */
+#define	ELEV_READ(pixel)	((pixel) - ELEV_V_OFF)
+#define	ELEV_WRITE(elev)	((elev) + ELEV_V_OFF)
+
 typedef struct {
 	int		lat;		/* latitude in degrees */
 	int		lon;		/* longitude in degrees */
@@ -308,6 +312,57 @@ out:
 	return (surf);
 }
 
+static inline double
+demd_read(const dsf_atom_t *demi, const dsf_atom_t *demd,
+    unsigned row, unsigned col)
+{
+	double v = 0;
+
+#define	DEMD_READ(data_type, val) \
+	do { \
+		(val) = ((data_type *)demd->payload)[row * \
+		    demi->demi_atom.width + col] * \
+		    demi->demi_atom.scale + demi->demi_atom.offset; \
+	} while (0)
+	switch (demi->demi_atom.flags & DEMI_DATA_MASK) {
+	case DEMI_DATA_FP32:
+		DEMD_READ(float, v);
+		break;
+	case DEMI_DATA_SINT:
+		switch (demi->demi_atom.bpp) {
+		case 1:
+			DEMD_READ(int8_t, v);
+			break;
+		case 2:
+			DEMD_READ(int16_t, v);
+			break;
+		case 4:
+			DEMD_READ(int32_t, v);
+			break;
+		}
+		break;
+	case DEMI_DATA_UINT:
+		switch (demi->demi_atom.bpp) {
+		case 1:
+			DEMD_READ(uint8_t, v);
+			break;
+		case 2:
+			DEMD_READ(uint16_t, v);
+			break;
+		case 4:
+			DEMD_READ(uint32_t, v);
+			break;
+		}
+		break;
+	default:
+		VERIFY(0);
+	}
+
+#undef	DEMD_READ
+
+	return (v);
+}
+
 static void
 render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
     const dsf_atom_t *demd)
@@ -319,7 +374,6 @@ render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
 	double dsf_res_y = TILE_HEIGHT / dsf_height;
 	double dsf_scale_x = tile->load_res / dsf_res_x;
 	double dsf_scale_y = tile->load_res / dsf_res_y;
-	const uint16_t *dsf_pixels = (const uint16_t *)demd->payload;
 	int16_t *pixels;
 	cairo_surface_t *water_mask_surf = NULL;
 
@@ -336,11 +390,10 @@ render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
 			    0, demi->demi_atom.width - 1);
 			int dsf_y = clampi(round(y * dsf_scale_y),
 			    0, demi->demi_atom.height - 1);
-			int elev = dsf_pixels[dsf_y * dsf_width + dsf_x] *
-			    demi->demi_atom.scale + demi->demi_atom.offset;
+			int elev = demd_read(demi, demd, dsf_y, dsf_x);
 
 			pixels[y * tile->pix_width + x] =
-			    clampi(elev, INT16_MIN, INT16_MAX);
+			    ELEV_WRITE(clampi(elev, INT16_MIN, INT16_MAX));
 		}
 	}
 
@@ -768,7 +821,7 @@ terr_get_elev(geo_pos2_t pos)
 		    0, tile->pix_width - 1);
 		int y = clampi((pos.lat - tile->lat) * tile->pix_height,
 		    0, tile->pix_height - 1);
-		elev = tile->pixels[y * tile->pix_width + x];
+		elev = ELEV_READ(tile->pixels[y * tile->pix_width + x]);
 	}
 	mutex_exit(&dem_tile_cache_lock);
 
@@ -805,7 +858,8 @@ terr_get_elev_wide(geo_pos2_t pos, geo_pos3_t terr_pos[9])
 		for (int yi = -1; yi <= 1; yi++) {
 			int xx = clampi(x + xi, 0, tile->pix_width - 1);
 			int yy = clampi(y + yi, 0, tile->pix_height - 1);
-			double e = tile->pixels[yy * tile->pix_width + xx];
+			double e =
+			    ELEV_READ(tile->pixels[yy * tile->pix_width + xx]);
 
 			if (terr_pos != NULL) {
 				terr_pos[i++] = GEO_POS3(
@@ -1032,32 +1086,36 @@ terr_probe(egpws_terr_probe_t *probe)
 		    0, tile->pix_width - 1);
 		y = clampi((pos.lat - tile->lat) * tile->pix_height,
 		    0, tile->pix_height - 1);
-		elev = tile->pixels[y * tile->pix_width + x];
+		elev = ELEV_READ(tile->pixels[y * tile->pix_width + x]);
 		probe->out_elev[i] = elev;
 
 		if (x == 0) {
-			elev_east = tile->pixels[y * tile->pix_width + x + 1];
+			elev_east = ELEV_READ(
+			    tile->pixels[y * tile->pix_width + x + 1]);
 			elev_west = elev;
 			dist_lon = tile->load_res;
 		} else if (x + 1 == tile->pix_width) {
 			elev_east = elev;
-			elev_west = tile->pixels[y * tile->pix_width + x - 1];
+			elev_west = tile->pixels[y * tile->pix_width + x - 1] -
+			    ELEV_V_OFF;
 			dist_lon = tile->load_res;
 		} else {
-			elev_east = tile->pixels[y * tile->pix_width + x - 1];
-			elev_west = tile->pixels[y * tile->pix_width + x + 1];
+			elev_east = tile->pixels[y * tile->pix_width + x - 1] -
+			    ELEV_V_OFF;
+			elev_west = tile->pixels[y * tile->pix_width + x + 1] -
+			    ELEV_V_OFF;
 			dist_lon = 2 * tile->load_res;
 		}
 		norm_lon = VECT3(elev_east - elev_west, 0, dist_lon);
 
 		if (y == 0) {
 			elev_north = elev;
-			elev_south =
-			    tile->pixels[(y + 1) * tile->pix_width + x];
+			elev_south = tile->pixels[(y + 1) *
+			    tile->pix_width + x] - ELEV_V_OFF;
 			dist_lat = tile->load_res;
 		} else if (y + 1 == tile->pix_height) {
-			elev_north =
-			    tile->pixels[(y - 1) * tile->pix_width + x];
+			elev_north = tile->pixels[(y - 1) *
+			    tile->pix_width + x] - ELEV_V_OFF;
 			elev_south = elev;
 			dist_lat = tile->load_res;
 		} else {

@@ -32,9 +32,12 @@ m2ft(float m)
 void
 main()
 {
-	/* The elevation is stored in the red & green channels */
+	/*
+	 * The elevation is stored in the red & green channels, offset by
+	 * 10000m to avoid underflowing on negative elevations.
+	 */
 	vec4 pixel = texture2D(tex, gl_TexCoord[0].st);
-	float terr_elev_m = (pixel.r * 255.0) + (pixel.g * 255 * 256);
+	float terr_elev_m = ((pixel.r * 255.0) + (pixel.g * 255 * 256)) - 10000;
 	float terr_elev_ft = m2ft(terr_elev_m);
 	float hgt_ft = acf_elev_ft - terr_elev_ft;
 

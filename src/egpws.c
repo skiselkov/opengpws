@@ -305,6 +305,18 @@ tawsb_nearest_arpt_or_rwy(const egpws_pos_t *pos, double *arpt_dist_p,
 
 	free_nearest_airport_list(arpts);
 
+	if (!IS_NULL_GEO_POS(state.tawsb.ncr.liftoff_pt)) {
+		vect3_t pos_v = geo2ecef(pos->pos, &wgs84);
+		vect3_t liftoff_v = geo2ecef(state.tawsb.ncr.liftoff_pt,
+		    &wgs84);
+		double d = vect3_abs(vect3_sub(pos_v, liftoff_v));
+
+		if (d < dist) {
+			dist = d;
+			hgt = state.tawsb.ncr.liftoff_pt.elev;
+		}
+	}
+
 	if (!isnan(dist) && !isnan(hgt)) {
 		*arpt_dist_p = dist;
 		*arpt_hgt_p = hgt;

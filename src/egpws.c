@@ -96,13 +96,13 @@ static struct {
 static void
 egpws_boot(void)
 {
-	const char *plugindir = get_plugindir();
-	char *cachedir = mkpathname(plugindir, "airport.cache", NULL);
+	char *cachedir = mkpathname(get_xpdir(), get_plugindir(),
+	    "airport.cache", NULL);
 
 	airportdb_create(&db, get_xpdir(), cachedir);
 	set_airport_load_limit(&db, ARPT_LOAD_LIMIT);
 	init_error = !recreate_cache(&db);
-	free(cachedir);
+	lacf_free(cachedir);
 }
 
 static void

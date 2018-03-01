@@ -28,7 +28,7 @@ SET(HDR
     snd_sys.h
     terr.h
     xplane.h
-    ../opengpws/xplane_api.h)
+    ../api/opengpws/xplane_api.h)
 
 SET(CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELEASE} -DDEBUG -g")
 SET(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -DDEBUG -O0 -g")
@@ -61,7 +61,8 @@ include_directories(opengpws PUBLIC
     "${LIBACFUTILS}/SDK/CHeaders/XPLM"
     "${LIBACFUTILS}/SDK/CHeaders/Widgets"
     "${LIBACFUTILS}/SDK/CHeaders/Wrappers"
-    "${LIBACFUTILS}/OpenAL/include")
+    "${LIBACFUTILS}/OpenAL/include"
+    "../api")
 
 if(APPLE)
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -arch x86_64 -Wno-deprecated")

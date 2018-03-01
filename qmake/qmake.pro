@@ -32,7 +32,7 @@ INCLUDEPATH += $$[LIBACFUTILS]/acf_apis
 INCLUDEPATH += $$[LIBACFUTILS]/glew
 
 # Needed for opengpws/xplane_api.h
-INCLUDEPATH += ..
+INCLUDEPATH += ../api
 
 QMAKE_CFLAGS += -O2 -std=c99 -g -W -Wall -Wextra -Werror -fvisibility=hidden \
     -Wno-unused-local-typedefs -Wunused-result

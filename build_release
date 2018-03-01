@@ -24,7 +24,7 @@ find data -iname '*.opus' -or -iname '*.glsl' | while read; do
 	$INSTALL -- "$REPLY" "$OUTPUT_DIR/$REPLY"
 done
 
-$INSTALL -- "opengpws/xplane_api.h" "$OUTPUT_DIR/opengpws/xplane_api.h"
+$INSTALL -- "api/opengpws/xplane_api.h" "$OUTPUT_DIR/opengpws/xplane_api.h"
 
 # ZIP up the product
 zip -r "$OUTPUT_DIR.zip" "$OUTPUT_DIR"

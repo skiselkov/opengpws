@@ -60,6 +60,7 @@ if [[ "$HOST_OS" = "Darwin" ]]; then
 	make distclean > /dev/null
 	qmake -spec macx-clang && \
 	    make -j $NCPUS &&
+	    mv libmac.xpl.dylib "$output_dir/mac.xpl"
 	if [ $? != 0 ] ; then
 		exit
 	fi

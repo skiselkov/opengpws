@@ -1,7 +1,14 @@
 #!/bin/bash
 
 OUTPUT_DIR="OpenGPWS"
-INSTALL="install -D -m 644"
+case $(uname) in
+Darwin)
+	INSTALL="ginstall -D -m 644"
+	;;
+*)
+	INSTALL="install -D -m 644"
+	;;
+esac
 
 set -e
 

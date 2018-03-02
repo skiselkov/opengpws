@@ -107,8 +107,6 @@ linux-g++-64 {
 macx {
 	# Prevent linking via clang++ which makes us depend on libstdc++
 	QMAKE_LINK = $$QMAKE_CC
-	QMAKE_CFLAGS += -mmacosx-version-min=10.7
-	QMAKE_LFLAGS += -mmacosx-version-min=10.7
 
 	DEFINES += APL=1 IBM=0 LIN=0
 	TARGET = mac.xpl
@@ -121,17 +119,9 @@ macx {
 macx-clang {
 	QMAKE_CFLAGS += $$system("$$[LIBACFUTILS]/pkg-config-deps mac-64 \
 	    --cflags")
-	QMAKE_CFLAGS += $$system("PKG_CONFIG_PATH=../pcre2/pcre2-mac-64 \
-	    pkg-config --cflags libpcre2-8")
-	QMAKE_CFLAGS += $$system("PKG_CONFIG_PATH=../libxml2/libxml2-mac-64 \
-	    pkg-config --cflags libxml-2.0")
 
 	LIBS += $$[LIBACFUTILS]/qmake/mac64/libacfutils.a
 	LIBS += $$system("$$[LIBACFUTILS]/pkg-config-deps mac-64 --libs")
-
-	LIBS += $$system("PKG_CONFIG_PATH=../pcre2/pcre2-mac-64 pkg-config \
-	    --libs libpcre2-8")
-	LIBS += "../libxml2/libxml2-mac-64/.libs/libxml2.a"
 }
 
 HEADERS += ../src/*.h

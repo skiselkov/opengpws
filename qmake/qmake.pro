@@ -11,7 +11,7 @@
 #
 # CDDL HEADER END
 
-# Copyright 2017 Saso Kiselkov. All rights reserved.
+# Copyright 2018 Saso Kiselkov. All rights reserved.
 
 # Shared library without any Qt functionality
 TEMPLATE = lib
@@ -70,6 +70,7 @@ win32 {
 	TARGET = win.xpl
 	QMAKE_DEL_FILE = rm -f
 	LIBS += -Wl,--exclude-libs,ALL
+	QMAKE_LFLAGS_RELEASE =
 }
 
 win32:contains(CROSS_COMPILE, x86_64-w64-mingw32-) {

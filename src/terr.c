@@ -35,6 +35,7 @@
 #include <acfutils/list.h>
 #include <acfutils/math.h>
 #include <acfutils/perf.h>
+#include <acfutils/safe_alloc.h>
 #include <acfutils/shader.h>
 #include <acfutils/worker.h>
 #include <acfutils/thread.h>
@@ -55,6 +56,8 @@
 #define	MIN_RNG			5000			/* meters */
 #define	DFL_RNG			50000			/* meters */
 #define	MAX_RNG			600000			/* meters */
+#define	MAX_TILE_PIXELS		10000			/* pixels */
+#define	DSF_DEMI_MIN_RES	32			/* pixels */
 #define	ALT_QUANT_STEP		FEET2MET(20)		/* quantization step */
 
 #define	ELEV_V_OFF		10000			/* meters */
@@ -161,7 +164,9 @@ dem_dsf_check(const dsf_t *dsf, const dsf_atom_t **demi_p,
 {
 	return (dsf != NULL && (*demi_p = dsf_lookup(dsf, DSF_ATOM_DEMS, 0,
 	    DSF_ATOM_DEMI, 0, 0)) != NULL && (*demd_p = dsf_lookup(dsf,
-	    DSF_ATOM_DEMS, 0, DSF_ATOM_DEMD, 0, 0)) != NULL);
+	    DSF_ATOM_DEMS, 0, DSF_ATOM_DEMD, 0, 0)) != NULL &&
+	    (*demi_p)->demi_atom.width >= DSF_DEMI_MIN_RES &&
+	    (*demi_p)->demi_atom.height >= DSF_DEMI_MIN_RES);
 }
 
 static dsf_t *
@@ -204,7 +209,7 @@ load_dem_dsf(int lat, int lon, const dsf_atom_t **demi_p,
 
 		if (dem_dsf_check(dsf, demi_p, demd_p)) {
 			ASSERT3P(te, ==, NULL);
-			te = calloc(1, sizeof (*te));
+			te = safe_calloc(1, sizeof (*te));
 			strlcpy(te->fname, fname, sizeof (te->fname));
 			te->path = path;
 			avl_add(&tnlc, te);
@@ -368,18 +373,29 @@ render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
     const dsf_atom_t *demd)
 {
 	double tile_width = (EARTH_CIRC / 360) * cos(DEG2RAD(tile->lat));
-	unsigned dsf_width = demi->demi_atom.width;
-	unsigned dsf_height = demi->demi_atom.height;
-	double dsf_res_x = tile_width / dsf_width;
-	double dsf_res_y = TILE_HEIGHT / dsf_height;
-	double dsf_scale_x = tile->load_res / dsf_res_x;
-	double dsf_scale_y = tile->load_res / dsf_res_y;
+	unsigned dsf_width, dsf_height;
+	double dsf_res_x, dsf_res_y;
+	double dsf_scale_x, dsf_scale_y;
 	int16_t *pixels;
 	cairo_surface_t *water_mask_surf = NULL;
 
+	dsf_width = demi->demi_atom.width;
+	dsf_height = demi->demi_atom.height;
+	dsf_res_x = tile_width / dsf_width;
+	dsf_res_y = TILE_HEIGHT / dsf_height;
+	ASSERT3F(dsf_res_x, >=, DSF_DEMI_MIN_RES);
+	ASSERT3F(dsf_res_y, >=, DSF_DEMI_MIN_RES);
+	dsf_scale_x = tile->load_res / dsf_res_x;
+	dsf_scale_y = tile->load_res / dsf_res_y;
+
 	tile->pix_width = tile_width / tile->load_res;
 	tile->pix_height = TILE_HEIGHT / tile->load_res;
-	pixels = malloc(tile->pix_width * tile->pix_height * sizeof (*pixels));
+	ASSERT3U(tile->pix_width, >=, 3);
+	ASSERT3U(tile->pix_width, <=, MAX_TILE_PIXELS);
+	ASSERT3U(tile->pix_height, >=, 3);
+	ASSERT3U(tile->pix_height, <=, MAX_TILE_PIXELS);
+	pixels = safe_malloc(tile->pix_width * tile->pix_height *
+	    sizeof (*pixels));
 
 	dbg_log(tile, 3, "render tile %d x %d (%d x %d)",
 	    tile->lat, tile->lon, tile->pix_width, tile->pix_height);
@@ -428,6 +444,8 @@ load_dem_tile(int lat, int lon, double load_res)
 	dsf_t *dsf = NULL;
 	const dsf_atom_t *demi = NULL, *demd = NULL;
 
+	ASSERT3F(load_res, >, 0);
+
 	mutex_enter(&dem_tile_cache_lock);
 	tile = avl_find(&dem_tile_cache, &srch, NULL);
 	if (tile != NULL && tile->remove) {
@@ -448,7 +466,7 @@ load_dem_tile(int lat, int lon, double load_res)
 	}
 
 	if (tile == NULL) {
-		tile = calloc(1, sizeof (*tile));
+		tile = safe_calloc(1, sizeof (*tile));
 		tile->lat = lat;
 		tile->lon = lon;
 		tile->cur_tex = -1;
@@ -462,6 +480,7 @@ load_dem_tile(int lat, int lon, double load_res)
 	if (dsf != NULL) {
 		ASSERT(!tile->empty);
 		render_dem_tile(tile, demi, demd);
+		ASSERT(tile->pixels != NULL);
 		/* marks the tile for GPU upload */
 		tile->dirty = B_TRUE;
 	} else {
@@ -518,6 +537,7 @@ select_tile_res(int tile_lat, int tile_lon, fpp_t fpp)
 		if (dist < rngs[i].range) {
 			dbg_log(tile, 2, "tile res %d x %d (dist: %.0f) = %.0f",
 			    tile_lat, tile_lon, dist, rngs[i].resolution);
+			ASSERT3F(rngs[i].resolution, >, 0);
 			return (rngs[i].resolution);
 		}
 	}
@@ -606,7 +626,7 @@ append_cust_srch_paths(void)
 		subpath = mkpathname(xpdir, buf, "Earth nav data", NULL);
 
 		if (file_exists(subpath, &is_dir) && is_dir) {
-			srch_path_t *path = calloc(1, sizeof (*path));
+			srch_path_t *path = safe_calloc(1, sizeof (*path));
 
 			path->path = subpath;
 			list_insert_tail(&srch_paths, path);
@@ -634,7 +654,7 @@ append_glob_srch_paths(void)
 		bool_t is_dir;
 
 		if (file_exists(subpath, &is_dir) && is_dir) {
-			srch_path_t *path = calloc(1, sizeof (*path));
+			srch_path_t *path = safe_calloc(1, sizeof (*path));
 			path->path = subpath;
 			list_insert_tail(&srch_paths, path);
 			dbg_log(tile, 2, "srch path %s\n", subpath);
@@ -821,6 +841,7 @@ terr_get_elev(geo_pos2_t pos)
 		    0, tile->pix_width - 1);
 		int y = clampi((pos.lat - tile->lat) * tile->pix_height,
 		    0, tile->pix_height - 1);
+		ASSERT(tile->pixels != NULL);
 		elev = ELEV_READ(tile->pixels[y * tile->pix_width + x]);
 	}
 	mutex_exit(&dem_tile_cache_lock);
@@ -853,6 +874,7 @@ terr_get_elev_wide(geo_pos2_t pos, geo_pos3_t terr_pos[9])
 	y = clampi(round((pos.lat - tile->lat) * tile->pix_height),
 	    0, tile->pix_height - 1);
 	i = 0;
+	ASSERT(tile->pixels != NULL);
 
 	for (int xi = -1; xi <= 1; xi++) {
 		for (int yi = -1; yi <= 1; yi++) {
@@ -1032,6 +1054,9 @@ terr_probe(egpws_terr_probe_t *probe)
 {
 	dem_tile_t *tile = NULL;
 
+	VERIFY(probe->out_elev != NULL);
+	VERIFY(probe->out_norm != NULL);
+
 	/*
 	 * OpenWXR can start asking us for terrain data early,
 	 * so just answer that we don't know anything yet.
@@ -1081,6 +1106,7 @@ terr_probe(egpws_terr_probe_t *probe)
 		}
 		ASSERT3U(tile->pix_width, >=, 3);
 		ASSERT3U(tile->pix_height, >=, 3);
+		ASSERT(tile->pixels != NULL);
 
 		x = clampi((pos.lon - tile->lon) * tile->pix_width,
 		    0, tile->pix_width - 1);

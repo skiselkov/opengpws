@@ -70,14 +70,16 @@ typedef struct {
 	double		min_elev;	/* minimum elevation (meters) */
 	double		max_elev;	/* maximum elevation (meters) */
 	double		load_res;	/* resolution at load time */
-	unsigned	pix_width;	/* tile width in pixels */
-	unsigned	pix_height;	/* tile height in pixels */
-	int16_t		*pixels;	/* elevation data samples */
 	bool_t		dirty;		/* pending upload to GPU */
 	GLsync		in_flight;	/* data in flight to GPU */
 	bool_t		empty;		/* tile contains no data */
 	bool_t		seen;		/* seen in presence check */
 	bool_t		remove;		/* mark for removal */
+
+	/* protected using dem_tile_cache_lock */
+	unsigned	pix_width;	/* tile width in pixels */
+	unsigned	pix_height;	/* tile height in pixels */
+	int16_t		*pixels;	/* elevation data samples */
 
 	const uint8_t	*water_mask;	/* water intensity in `pixels' above */
 	int		water_mask_stride;
@@ -374,6 +376,7 @@ render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
 {
 	double tile_width = (EARTH_CIRC / 360) * cos(DEG2RAD(tile->lat));
 	unsigned dsf_width, dsf_height;
+	unsigned pix_width, pix_height;
 	double dsf_res_x, dsf_res_y;
 	double dsf_scale_x, dsf_scale_y;
 	int16_t *pixels;
@@ -388,35 +391,37 @@ render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
 	dsf_scale_x = tile->load_res / dsf_res_x;
 	dsf_scale_y = tile->load_res / dsf_res_y;
 
-	tile->pix_width = tile_width / tile->load_res;
-	tile->pix_height = TILE_HEIGHT / tile->load_res;
-	ASSERT3U(tile->pix_width, >=, 3);
-	ASSERT3U(tile->pix_width, <=, MAX_TILE_PIXELS);
-	ASSERT3U(tile->pix_height, >=, 3);
-	ASSERT3U(tile->pix_height, <=, MAX_TILE_PIXELS);
-	pixels = safe_malloc(tile->pix_width * tile->pix_height *
-	    sizeof (*pixels));
+	pix_width = tile_width / tile->load_res;
+	pix_height = TILE_HEIGHT / tile->load_res;
+	ASSERT3U(pix_width, >=, 3);
+	ASSERT3U(pix_width, <=, MAX_TILE_PIXELS);
+	ASSERT3U(pix_height, >=, 3);
+	ASSERT3U(pix_height, <=, MAX_TILE_PIXELS);
+	pixels = safe_malloc(pix_width * pix_height * sizeof (*pixels));
 
 	dbg_log(tile, 3, "render tile %d x %d (%d x %d)",
-	    tile->lat, tile->lon, tile->pix_width, tile->pix_height);
+	    tile->lat, tile->lon, pix_width, pix_height);
 
-	for (unsigned y = 0; y < tile->pix_height; y++) {
-		for (unsigned x = 0; x < tile->pix_width; x++) {
+	for (unsigned y = 0; y < pix_height; y++) {
+		for (unsigned x = 0; x < pix_width; x++) {
 			int dsf_x = clampi(round(x * dsf_scale_x),
 			    0, demi->demi_atom.width - 1);
 			int dsf_y = clampi(round(y * dsf_scale_y),
 			    0, demi->demi_atom.height - 1);
 			int elev = demd_read(demi, demd, dsf_y, dsf_x);
 
-			pixels[y * tile->pix_width + x] =
+			pixels[y * pix_width + x] =
 			    ELEV_WRITE(clampi(elev, INT16_MIN, INT16_MAX));
 		}
 	}
 
 	water_mask_surf = render_water_mask(tile->lat, tile->lon,
-	    tile->pix_width, tile->pix_height);
+	    pix_width, pix_height);
 
 	mutex_enter(&dem_tile_cache_lock);
+
+	tile->pix_width = pix_width;
+	tile->pix_height = pix_height;
 	free(tile->pixels);
 	tile->pixels = pixels;
 	if (tile->water_mask_surf != NULL) {
@@ -432,6 +437,7 @@ render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
 		tile->water_mask_stride =
 		    cairo_image_surface_get_stride(water_mask_surf);
 	}
+
 	mutex_exit(&dem_tile_cache_lock);
 }
 
@@ -861,6 +867,7 @@ terr_get_elev_wide(geo_pos2_t pos, geo_pos3_t terr_pos[9])
 	int x, y, i;
 
 	mutex_enter(&dem_tile_cache_lock);
+
 	tile = avl_find(&dem_tile_cache, &srch, NULL);
 	if (tile == NULL || tile->empty) {
 		dbg_log(terr, 3, "get elev (%.4fx%.4f) = nan\n",
@@ -896,6 +903,7 @@ terr_get_elev_wide(geo_pos2_t pos, geo_pos3_t terr_pos[9])
 				elev = e;
 		}
 	}
+
 	mutex_exit(&dem_tile_cache_lock);
 
 	dbg_log(terr, 3, "get elev (%.4fx%.4f) = %.0f\n",

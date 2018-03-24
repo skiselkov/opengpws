@@ -29,6 +29,12 @@ else
 	    "$OUTPUT_DIR/mac_x64/${OUTPUT_DIR}.xpl"
 fi
 
+find data -iname '*.flac' | while read; do
+	if ! [ -f "${REPLY/%.flac/.opus}" ]; then
+		opusenc --bitrate 32 "${REPLY}" "${REPLY/%.flac/.opus}"
+	fi
+done
+
 find data -iname '*.opus' -or -iname '*.glsl' | while read; do
 	$INSTALL -- "$REPLY" "$OUTPUT_DIR/$REPLY"
 done

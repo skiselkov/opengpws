@@ -57,7 +57,7 @@
 #define	DFL_RNG			50000			/* meters */
 #define	MAX_RNG			600000			/* meters */
 #define	MAX_TILE_PIXELS		10000			/* pixels */
-#define	DSF_DEMI_MIN_RES	32			/* pixels */
+#define	DSF_DEMI_MIN_RES	2			/* pixels */
 #define	ALT_QUANT_STEP		FEET2MET(20)		/* quantization step */
 
 #define	ELEV_V_OFF		10000			/* meters */

@@ -100,6 +100,7 @@ egpws_boot(void)
 	    "airport.cache", NULL);
 
 	airportdb_create(&db, get_xpdir(), cachedir);
+	db.ifr_only = conf.ifr_only;
 	set_airport_load_limit(&db, ARPT_LOAD_LIMIT);
 	init_error = !recreate_cache(&db);
 	lacf_free(cachedir);

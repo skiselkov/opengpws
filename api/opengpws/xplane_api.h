@@ -77,6 +77,7 @@ typedef struct {
 
 typedef struct {
 	bool_t		jet;		/* aircraft is a turbojet */
+	bool_t		ifr_only;	/* only check IFR airports */
 	appr_min_t	appr_min;	/* how to call out approaching mins */
 	ra_call_mask_t	ra_calls;	/* how/if to annunciate RA altitudes */
 	ra_500_type_t	ra_500;		/* how to annunciate "FIVE HUNDRED" */

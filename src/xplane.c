@@ -98,7 +98,8 @@ static egpws_intf_t intf = {
 	.get_advisory = egpws_get_advisory,
 	.set_sound_inh = snd_sys_set_inh,
 	.get_impact_pts = egpws_get_impact_points,
-	.terr_probe = terr_probe
+	.terr_probe = terr_probe,
+	.terr_have_data = terr_have_data
 };
 
 static int

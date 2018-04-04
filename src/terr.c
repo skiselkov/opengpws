@@ -1183,3 +1183,22 @@ terr_probe(egpws_terr_probe_t *probe)
 
 	mutex_exit(&dem_tile_cache_lock);
 }
+
+/*
+ * Returns B_TRUE if OpenGPWS has data (of any resolution) for the requested
+ * latitude and longitude, or B_FALSE if it has no data for the specified
+ * point. This can be used as a quick test before querying OpenGPWS via the
+ * much more expensive terr_probe interface.
+ */
+bool_t
+terr_have_data(geo_pos2_t pos)
+{
+	dem_tile_t *tile;
+	dem_tile_t srch = { .lat = floor(pos.lat), .lon = floor(pos.lon) };
+
+	mutex_enter(&dem_tile_cache_lock);
+	tile = avl_find(&dem_tile_cache, &srch, NULL);
+	mutex_exit(&dem_tile_cache_lock);
+
+	return (tile != NULL);
+}

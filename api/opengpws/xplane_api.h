@@ -150,6 +150,7 @@ typedef struct {
 	void (*set_sound_inh)(bool_t flag);
 	void (*get_impact_pts)(egpws_impact_t *imp);
 	void (*terr_probe)(egpws_terr_probe_t *probe);
+	bool_t (*terr_have_data)(geo_pos2_t pos);
 } egpws_intf_t;
 
 enum {

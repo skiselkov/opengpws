@@ -1114,7 +1114,6 @@ terr_probe(egpws_terr_probe_t *probe)
 	dem_tile_t *tile = NULL;
 
 	VERIFY(probe->out_elev != NULL);
-	VERIFY(probe->out_norm != NULL);
 
 	/*
 	 * OpenWXR can start asking us for terrain data early,
@@ -1152,7 +1151,8 @@ terr_probe(egpws_terr_probe_t *probe)
 		}
 		if (tile == NULL || tile->empty) {
 			probe->out_elev[i] = 0;
-			probe->out_norm[i] = VECT3(0, 0, 1);
+			if (probe->out_norm != NULL)
+				probe->out_norm[i] = VECT3(0, 0, 1);
 			/*
 			 * If there is no terrain tile, then X-Plane will draw
 			 * water here. So just draw water as well.

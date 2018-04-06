@@ -1057,6 +1057,57 @@ terr_render(const egpws_render_t *render)
 		draw_tiles(render);
 }
 
+static void
+compute_terr_norm_vector(dem_tile_t *tile, unsigned x, unsigned y,
+    double elev, vect3_t *out_norm)
+{
+	double elev_west, elev_east, elev_north, elev_south;
+	double dist_lat, dist_lon, slope_lon, slope_lat;
+	vect3_t norm_lat, norm_lon;
+
+	if (x == 0) {
+		elev_east =
+		    ELEV_READ(tile->pixels[y * tile->pix_width + x + 1]);
+		elev_west = elev;
+		dist_lon = tile->load_res;
+	} else if (x + 1 == tile->pix_width) {
+		elev_east = elev;
+		elev_west =
+		    ELEV_READ(tile->pixels[y * tile->pix_width + x - 1]);
+		dist_lon = tile->load_res;
+	} else {
+		elev_east =
+		    ELEV_READ(tile->pixels[y * tile->pix_width + x - 1]);
+		elev_west =
+		    ELEV_READ(tile->pixels[y * tile->pix_width + x + 1]);
+		dist_lon = 2 * tile->load_res;
+	}
+	slope_lon = RAD2DEG(atan((elev_east - elev_west) / dist_lon));
+	norm_lon = vect3_rot(VECT3(0, 0, 1), slope_lon, 1);
+
+	if (y == 0) {
+		elev_north = elev;
+		elev_south =
+		    ELEV_READ(tile->pixels[(y + 1) * tile->pix_width + x]);
+		dist_lat = tile->load_res;
+	} else if (y + 1 == tile->pix_height) {
+		elev_north =
+		    ELEV_READ(tile->pixels[(y - 1) * tile->pix_width + x]);
+		elev_south = elev;
+		dist_lat = tile->load_res;
+	} else {
+		elev_north =
+		    ELEV_READ(tile->pixels[(y - 1) * tile->pix_width + x]);
+		elev_south =
+		    ELEV_READ(tile->pixels[(y + 1) * tile->pix_width + x]);
+		dist_lat = 2 * tile->load_res;
+	}
+	slope_lat = RAD2DEG(atan((elev_south - elev_north) / dist_lat));
+	norm_lat = vect3_rot(VECT3(0, 0, 1), slope_lat, 0);
+
+	*out_norm = vect3_unit(vect3_add(norm_lat, norm_lon), NULL);
+}
+
 void
 terr_probe(egpws_terr_probe_t *probe)
 {
@@ -1087,9 +1138,7 @@ terr_probe(egpws_terr_probe_t *probe)
 		geo_pos2_t pos = probe->in_pts[i];
 		int tile_lat = floor(pos.lat), tile_lon = floor(pos.lon);
 		unsigned x, y;
-		double elev, elev_west, elev_east, elev_north, elev_south;
-		double dist_lat, dist_lon;
-		vect3_t norm_lat, norm_lon;
+		double elev;
 
 		/*
 		 * Check if we can recycle the previous tile. Most probes
@@ -1121,48 +1170,14 @@ terr_probe(egpws_terr_probe_t *probe)
 		y = clampi((pos.lat - tile->lat) * tile->pix_height,
 		    0, tile->pix_height - 1);
 		elev = ELEV_READ(tile->pixels[y * tile->pix_width + x]);
-		probe->out_elev[i] = elev;
 
-		if (x == 0) {
-			elev_east = ELEV_READ(
-			    tile->pixels[y * tile->pix_width + x + 1]);
-			elev_west = elev;
-			dist_lon = tile->load_res;
-		} else if (x + 1 == tile->pix_width) {
-			elev_east = elev;
-			elev_west = tile->pixels[y * tile->pix_width + x - 1] -
-			    ELEV_V_OFF;
-			dist_lon = tile->load_res;
-		} else {
-			elev_east = tile->pixels[y * tile->pix_width + x - 1] -
-			    ELEV_V_OFF;
-			elev_west = tile->pixels[y * tile->pix_width + x + 1] -
-			    ELEV_V_OFF;
-			dist_lon = 2 * tile->load_res;
+		if (probe->out_elev != NULL)
+			probe->out_elev[i] = elev;
+
+		if (probe->out_norm != NULL) {
+			compute_terr_norm_vector(tile, x, y, elev,
+			    &probe->out_norm[i]);
 		}
-		norm_lon = VECT3(elev_east - elev_west, 0, dist_lon);
-
-		if (y == 0) {
-			elev_north = elev;
-			elev_south = tile->pixels[(y + 1) *
-			    tile->pix_width + x] - ELEV_V_OFF;
-			dist_lat = tile->load_res;
-		} else if (y + 1 == tile->pix_height) {
-			elev_north = tile->pixels[(y - 1) *
-			    tile->pix_width + x] - ELEV_V_OFF;
-			elev_south = elev;
-			dist_lat = tile->load_res;
-		} else {
-			elev_north =
-			    tile->pixels[(y - 1) * tile->pix_width + x];
-			elev_south =
-			    tile->pixels[(y + 1) * tile->pix_width + x];
-			dist_lat = 2 * tile->load_res;
-		}
-		norm_lat = VECT3(0, elev_south - elev_north, dist_lat);
-
-		probe->out_norm[i] = vect3_unit(vect3_add(norm_lat, norm_lon),
-		    NULL);
 
 		if (probe->out_water != NULL) {
 			if (tile->water_mask != NULL) {

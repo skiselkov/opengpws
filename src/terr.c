@@ -1206,7 +1206,7 @@ terr_probe(egpws_terr_probe_t *probe)
  * much more expensive terr_probe interface.
  */
 bool_t
-terr_have_data(geo_pos2_t pos)
+terr_have_data(geo_pos2_t pos, double *tile_load_res)
 {
 	dem_tile_t *tile;
 	dem_tile_t srch = { .lat = floor(pos.lat), .lon = floor(pos.lon) };
@@ -1215,5 +1215,10 @@ terr_have_data(geo_pos2_t pos)
 	tile = avl_find(&dem_tile_cache, &srch, NULL);
 	mutex_exit(&dem_tile_cache_lock);
 
-	return (tile != NULL);
+	if (tile != NULL && !tile->empty) {
+		if (tile_load_res != NULL)
+			*tile_load_res = tile->load_res;
+		return (B_TRUE);
+	}
+	return (B_FALSE);
 }

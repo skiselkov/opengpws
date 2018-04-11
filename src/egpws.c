@@ -85,6 +85,8 @@ static struct {
 			double		prev_hgt;
 			double		max_alt;
 			double		prev_alt;
+			double		vs_alt;
+			double		vs_hgt;
 		} ncr;
 		struct {
 			bool_t		ahead_played;
@@ -220,7 +222,7 @@ tawsb_edr(const egpws_pos_t *pos)
 	    warn_vs, pos->vs);
 
 	if (pos->vs <= warn_vs) {
-		dbg_log(egpws, 2, "edr| pull up");
+		dbg_log(egpws, 2, "edr| PULL UP");
 		state.tawsb.edr.lo_caut = B_TRUE;
 		state.tawsb.edr.hi_caut = B_TRUE;
 		sched_sound(SND_PUP);
@@ -312,9 +314,11 @@ tawsb_nearest_arpt_or_rwy(const egpws_pos_t *pos, double *arpt_dist_p,
 		    &wgs84);
 		double d = vect3_abs(vect3_sub(pos_v, liftoff_v));
 
-		if (d < dist) {
+		if (isnan(dist) || d < dist) {
 			dist = d;
 			hgt = state.tawsb.ncr.liftoff_pt.elev;
+			printf("liftoff pt dist: %.0f   elev: %.0f\n",
+			    dist, hgt);
 		}
 	}
 
@@ -439,7 +443,8 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 	}
 
 	/* Inihibit within 0.5 NM and less than 200 ft above destination */
-	if (arpt_dist < RTC_INH_DIST_THRESH && arpt_hgt < RTC_INH_HGT_THRESH) {
+	if (arpt_dist < RTC_INH_DIST_THRESH &&
+	    pos->pos.elev - arpt_hgt < RTC_INH_HGT_THRESH) {
 		clear_impact();
 		return;
 	}
@@ -586,6 +591,7 @@ tawsb_pda(const egpws_pos_t *pos, const egpws_arpt_ref_t *dest,
 	dbg_log(egpws, 1, "pda| elv: %.0f  min: %.0f", pos->pos.elev, min_elev);
 	if (pos->pos.elev < min_elev) {
 		sched_sound(SND_TOO_LOW_TERR);
+		dbg_log(egpws, 2, "pda|  TOO LOW TERR");
 		state.adv = MAX(state.adv, EGPWS_ADVISORY_TERRAIN);
 	}
 }
@@ -680,8 +686,8 @@ tawsb_ncr(const egpws_pos_t *pos)
 		NULL_VECT2
 	};
 	vect3_t my_ecef, dep_ecef;
-	double hgt, d_hdg, dist, vs_hgt, vs_alt, alt_lim, vs_lim, d_hgt, d_alt;
-	double terr_elev;
+	double hgt, d_hdg, dist, alt_lim, vs_lim, d_hgt, d_alt;
+	double terr_elev, new_vs_hgt, new_vs_alt, vs_hgt, vs_alt, afe;
 
 	/* Reactivate NCR on the ground */
 	if (pos->on_gnd) {
@@ -693,10 +699,15 @@ tawsb_ncr(const egpws_pos_t *pos)
 		state.tawsb.ncr.prev_hgt = 0;
 		state.tawsb.ncr.max_alt = pos->pos.elev;
 		state.tawsb.ncr.prev_alt = pos->pos.elev;
+		state.tawsb.ncr.vs_alt = 0;
+		state.tawsb.ncr.vs_hgt = 0;
 		return;
 	}
-	if (!state.tawsb.ncr.active)
+	if (!state.tawsb.ncr.active) {
+		state.tawsb.ncr.vs_alt = 0;
+		state.tawsb.ncr.vs_hgt = 0;
 		return;
+	}
 
 	/* Validate the NCR termination conditions */
 	my_ecef = geo2ecef(pos->pos, &wgs84);
@@ -717,18 +728,27 @@ tawsb_ncr(const egpws_pos_t *pos)
 		return;
 	}
 
-	vs_hgt = (hgt - state.tawsb.ncr.prev_hgt) / RUN_INTVAL;
-	vs_alt = (pos->pos.elev - state.tawsb.ncr.prev_alt) / RUN_INTVAL;
+	/*
+	 * We need to filter these values in gradually to avoid spurious
+	 * cautions when we get a sudden short jump up in terrain below us.
+	 */
+	new_vs_hgt = (hgt - state.tawsb.ncr.prev_hgt) / RUN_INTVAL;
+	new_vs_alt = (pos->pos.elev - state.tawsb.ncr.prev_alt) / RUN_INTVAL;
+	FILTER_IN(state.tawsb.ncr.vs_hgt, new_vs_hgt, RUN_INTVAL, 2);
+	FILTER_IN(state.tawsb.ncr.vs_alt, new_vs_alt, RUN_INTVAL, 2);
+	vs_hgt = state.tawsb.ncr.vs_hgt;
+	vs_alt = state.tawsb.ncr.vs_alt;
 
-	d_hgt = hgt - state.tawsb.ncr.max_hgt;
+	afe = pos->pos.elev - state.tawsb.ncr.liftoff_pt.elev;
+	d_hgt = hgt - MIN(afe, state.tawsb.ncr.max_hgt);
 	d_alt = pos->pos.elev - state.tawsb.ncr.max_alt;
 
 	alt_lim = fx_lin_multi(hgt, alt_curve, B_FALSE);
 	vs_lim = fx_lin_multi(hgt, vs_curve, B_FALSE);
 
 	dbg_log(egpws, 1, "ncr| vs_hgt:%.1f  vs_alt:%.1f  "
-	    "d_hgt:%.0f  d_alt:%.0f  alt_lim:%.0f  vs_lim:%.0f",
-	    vs_hgt, vs_alt, d_hgt, d_alt, alt_lim, vs_lim);
+	    "d_hgt:%.0f  d_alt:%.0f  afe:%.0f  alt_lim:%.0f  vs_lim:%.0f",
+	    vs_hgt, vs_alt, d_hgt, d_alt, afe, alt_lim, vs_lim);
 
 	if (vs_hgt < vs_lim || d_hgt < alt_lim) {
 		/*
@@ -736,15 +756,19 @@ tawsb_ncr(const egpws_pos_t *pos)
 		 * otherwise advise of rising terrain.
 		 */
 		if (vs_hgt < NCR_SUPRESS_CLB_RATE) {
-			if (vs_alt < 0)
+			if (vs_alt < 0) {
 				sched_sound(SND_DONT_SINK);
-			else
+				dbg_log(egpws, 2, "ncr| DONT SINK");
+			} else {
 				sched_sound(SND_TOO_LOW_TERR);
+				dbg_log(egpws, 2, "ncr| TOO LOW TERR");
+			}
 			state.adv = MAX(state.adv, EGPWS_ADVISORY_TERRAIN);
 		}
 	} else if (vs_alt < vs_lim || d_alt < alt_lim) {
 		if (vs_hgt < NCR_SUPRESS_CLB_RATE) {
 			sched_sound(SND_DONT_SINK);
+			dbg_log(egpws, 2, "ncr| TOO LOW TERR");
 			state.adv = MAX(state.adv, EGPWS_ADVISORY_TERRAIN);
 		}
 	}

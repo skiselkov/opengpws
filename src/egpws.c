@@ -317,8 +317,6 @@ tawsb_nearest_arpt_or_rwy(const egpws_pos_t *pos, double *arpt_dist_p,
 		if (isnan(dist) || d < dist) {
 			dist = d;
 			hgt = state.tawsb.ncr.liftoff_pt.elev;
-			printf("liftoff pt dist: %.0f   elev: %.0f\n",
-			    dist, hgt);
 		}
 	}
 

@@ -753,7 +753,7 @@ terr_init(const char *the_xpdir, const char *plugindir)
 	frag_prog_path = mkpathname(xpdir, plugindir, "data", "DEM_frag.glsl",
 	    NULL);
 	DEM_prog = shader_prog_from_file("DEM_shader", vtx_prog_path,
-	    frag_prog_path);
+	    frag_prog_path, NULL);
 	lacf_free(vtx_prog_path);
 	lacf_free(frag_prog_path);
 }

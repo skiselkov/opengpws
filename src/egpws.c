@@ -291,7 +291,7 @@ tawsb_db_arpt_dist(const egpws_pos_t *pos, airport_t *arpt,
 
 static bool_t
 tawsb_nearest_arpt_or_rwy(const egpws_pos_t *pos, double *arpt_dist_p,
-    double *arpt_hgt_p)
+    double *arpt_rel_hgt_p)
 {
 	list_t *arpts = find_nearest_airports(&db, GEO3_TO_GEO2(pos->pos));
 	double dist = NAN, hgt = NAN;
@@ -316,13 +316,13 @@ tawsb_nearest_arpt_or_rwy(const egpws_pos_t *pos, double *arpt_dist_p,
 
 		if (isnan(dist) || d < dist) {
 			dist = d;
-			hgt = state.tawsb.ncr.liftoff_pt.elev;
+			hgt = pos->pos.elev - state.tawsb.ncr.liftoff_pt.elev;
 		}
 	}
 
 	if (!isnan(dist) && !isnan(hgt)) {
 		*arpt_dist_p = dist;
-		*arpt_hgt_p = hgt;
+		*arpt_rel_hgt_p = hgt;
 		return (B_TRUE);
 	} else {
 		return (B_FALSE);
@@ -417,7 +417,7 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 		VECT2(1e11,		FEET2MET(100)),
 		NULL_VECT2
 	};
-	double rqd_clr, coll_clr, trk, arpt_dist, arpt_hgt;
+	double rqd_clr, coll_clr, trk, arpt_dist, arpt_rel_hgt;
 	fpp_t fpp;
 	vect2_t p;
 	double cur_hgt = NAN;
@@ -435,14 +435,14 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 		return;
 	}
 
-	if (!tawsb_nearest_arpt_or_rwy(pos, &arpt_dist, &arpt_hgt)) {
+	if (!tawsb_nearest_arpt_or_rwy(pos, &arpt_dist, &arpt_rel_hgt)) {
 		arpt_dist = 1e10;
-		arpt_hgt = 1e10;
+		arpt_rel_hgt = 1e10;
 	}
 
 	/* Inihibit within 0.5 NM and less than 200 ft above destination */
 	if (arpt_dist < RTC_INH_DIST_THRESH &&
-	    pos->pos.elev - arpt_hgt < RTC_INH_HGT_THRESH) {
+	    arpt_rel_hgt < RTC_INH_HGT_THRESH) {
 		clear_impact();
 		return;
 	}

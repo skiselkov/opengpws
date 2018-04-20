@@ -23,6 +23,8 @@ uniform float acf_elev_ft;
 uniform vec2 hgt_rngs_ft[4];
 uniform vec4 hgt_colors[4];
 
+varying vec2	tex_coord;
+
 float
 m2ft(float m)
 {
@@ -36,7 +38,7 @@ main()
 	 * The elevation is stored in the red & green channels, offset by
 	 * 10000m to avoid underflowing on negative elevations.
 	 */
-	vec4 pixel = texture2D(tex, gl_TexCoord[0].st);
+	vec4 pixel = texture2D(tex, tex_coord);
 	float terr_elev_m = ((pixel.r * 255.0) + (pixel.g * 255 * 256)) - 10000;
 	float terr_elev_ft = m2ft(terr_elev_m);
 	float hgt_ft = acf_elev_ft - terr_elev_ft;
@@ -47,5 +49,5 @@ main()
 			return;
 		}
 	}
-	gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+	gl_FragColor = vec4(0);
 }

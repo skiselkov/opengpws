@@ -654,8 +654,12 @@ tawsb_500(const egpws_pos_t *pos)
 		if (!state.tawsb.ann_500ft) {
 			dbg_log(egpws, 1, "500| CALL elv:%.0f  gnd:%.0f  "
 			    "ra:%.0f", pos->pos.elev, gnd_elev, ra);
-			if (!pos->on_gnd)
-				sched_sound(SND_RA_500_BOEING);
+			if (!pos->on_gnd) {
+				if (conf.ra_500 == RA_500_GARMIN)
+					sched_sound(SND_RA_500_GARMIN);
+				else
+					sched_sound(SND_RA_500_BOEING);
+			}
 			state.tawsb.ann_500ft = B_TRUE;
 		}
 	} else if (ra > FEET2MET(600) && state.tawsb.ann_500ft) {

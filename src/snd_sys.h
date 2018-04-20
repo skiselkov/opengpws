@@ -48,6 +48,7 @@ typedef enum {
 	SND_RA_300_BOEING,	/* 300 ft RA */
 	SND_RA_400_BOEING,	/* 400 ft RA */
 	SND_RA_500_BOEING,	/* 500 ft RA */
+	SND_RA_500_GARMIN,	/* 500 ft RA (Garmin) */
 	SND_RA_1000_BOEING,	/* 1000 ft RA */
 	SND_RA_2500_BOEING,	/* 2500 ft RA */
 	SND_TOO_LOW_GEAR,	/* Too low, gear */

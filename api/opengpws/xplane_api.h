@@ -61,7 +61,8 @@ typedef enum {
 	RA_500_HARD,	/* Call out "FIVE HUNDRED" RA once during appr */
 	RA_500_SMART,	/* Call out "FIVE HUNDRED" on non-precision appr */
 	RA_500_AFE,	/* Call out "FIVE HUNDRED" of closest rwy elev */
-	RA_500_ABV_AFE	/* Call out "FIVE HUNDRED ABOVE" of closest rwy elev */
+	RA_500_ABV_AFE,	/* Call out "FIVE HUNDRED ABOVE" of closest rwy elev */
+	RA_500_GARMIN	/* Call out "FIVE HUNDRED" using the Garmin audio */
 } ra_500_type_t;
 
 typedef enum {
@@ -113,6 +114,7 @@ typedef struct {
 	double		rotation;
 	double		scale;
 	vect2_t		offset;
+	vect2_t		disp_sz;	/* pixel-size of target */
 } egpws_render_t;
 
 typedef enum {

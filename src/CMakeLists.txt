@@ -62,6 +62,7 @@ include_directories(opengpws PUBLIC
     "${LIBACFUTILS}/SDK/CHeaders/Widgets"
     "${LIBACFUTILS}/SDK/CHeaders/Wrappers"
     "${LIBACFUTILS}/OpenAL/include"
+    "${LIBACFUTILS}/cglm/cglm-0.4.1/include"
     "../api")
 
 if(APPLE)

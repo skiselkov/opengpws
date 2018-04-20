@@ -23,6 +23,7 @@
 #include <math.h>
 
 #include <GL/glew.h>
+#include <cglm/cglm.h>
 #include <shapefil.h>
 #include <cairo.h>
 
@@ -31,6 +32,7 @@
 #include <acfutils/assert.h>
 #include <acfutils/avl.h>
 #include <acfutils/dsf.h>
+#include <acfutils/glutils.h>
 #include <acfutils/helpers.h>
 #include <acfutils/list.h>
 #include <acfutils/math.h>
@@ -748,10 +750,8 @@ terr_init(const char *the_xpdir, const char *plugindir)
 	worker_init(&load_dem_worker_wk, load_dem_worker,
 	    SEC2USEC(LOAD_DEM_WORKER_INTVAL), NULL, "OpenGPWS_terr_wk");
 
-	vtx_prog_path = mkpathname(xpdir, plugindir, "data", "DEM_vtx.glsl",
-	    NULL);
-	frag_prog_path = mkpathname(xpdir, plugindir, "data", "DEM_frag.glsl",
-	    NULL);
+	vtx_prog_path = mkpathname(xpdir, plugindir, "data", "DEM.vert", NULL);
+	frag_prog_path = mkpathname(xpdir, plugindir, "data", "DEM.frag", NULL);
 	DEM_prog = shader_prog_from_file("DEM_shader", vtx_prog_path,
 	    frag_prog_path, NULL);
 	lacf_free(vtx_prog_path);
@@ -987,8 +987,31 @@ draw_tiles(const egpws_render_t *render)
 	fpp_t fpp = ortho_fpp_init(GEO3_TO_GEO2(render->position),
 	    render->rotation, &wgs84, B_FALSE);
 	const egpws_conf_t *conf = egpws_get_conf();
+	mat4 pvm;
+	GLfloat hgt_rngs_ft[4 * 2];
+	GLfloat hgt_colors[4 * 4];
 
-	XPLMSetGraphicsState(0, 1, 0, 1, 1, 1, 1);
+	glm_ortho(0, render->disp_sz.x, 0, render->disp_sz.y, 0, 1, pvm);
+	glm_translate(pvm, (vec3){render->offset.x, render->offset.y, 0});
+
+	for (int i = 0; i < 4; i++) {
+		const egpws_terr_color_t *color = &conf->terr_colors[i];
+		hgt_rngs_ft[i * 2] = MET2FEET(color->min_hgt);
+		hgt_rngs_ft[i * 2 + 1] = MET2FEET(color->max_hgt);
+		for (int j = 0; j < 4; j++)
+			hgt_colors[i * 4 + j] = color->rgba[j];
+	}
+
+	glActiveTexture(GL_TEXTURE0);
+
+	glUseProgram(DEM_prog);
+
+	glUniformMatrix4fv(glGetUniformLocation(DEM_prog, "pvm"),
+	    1, GL_FALSE, (GLfloat *)pvm);
+	glUniform2fv(glGetUniformLocation(DEM_prog, "hgt_rngs_ft"),
+	    4 * 2, hgt_rngs_ft);
+	glUniform4fv(glGetUniformLocation(DEM_prog, "hgt_colors"),
+	    4 * 4, hgt_colors);
 
 	mutex_enter(&dem_tile_cache_lock);
 	for (dem_tile_t *tile = avl_first(&dem_tile_cache);
@@ -997,8 +1020,7 @@ draw_tiles(const egpws_render_t *render)
 		vect2_t t[4] = {
 		    VECT2(0, 0), VECT2(0, 1), VECT2(1, 1), VECT2(1, 0)
 		};
-		GLfloat hgt_rngs_ft[4 * 2];
-		GLfloat hgt_colors[4 * 4];
+		glutils_quads_t quads;
 
 		if (tile->cur_tex == -1)
 			continue;
@@ -1008,38 +1030,18 @@ draw_tiles(const egpws_render_t *render)
 		v[2] = geo2fpp(GEO_POS2(tile->lat + 1, tile->lon + 1), &fpp);
 		v[3] = geo2fpp(GEO_POS2(tile->lat, tile->lon + 1), &fpp);
 
-		for (int i = 0; i < 4; i++) {
-			v[i] = vect2_add(vect2_scmul(v[i], render->scale),
-			    render->offset);
-		}
+		for (int i = 0; i < 4; i++)
+			v[i] = vect2_scmul(v[i], render->scale);
 
-		glActiveTexture(GL_TEXTURE0);
-		XPLMBindTexture2d(tile->tex[tile->cur_tex], GL_TEXTURE_2D);
-
-		glUseProgram(DEM_prog);
+		glBindTexture(GL_TEXTURE_2D, tile->tex[tile->cur_tex]);
 
 		glUniform1i(glGetUniformLocation(DEM_prog, "tex"), 0);
 		glUniform1f(glGetUniformLocation(DEM_prog, "acf_elev_ft"),
 		    MET2FEET(glob_pos.elev));
 
-		for (int i = 0; i < 4; i++) {
-			const egpws_terr_color_t *color = &conf->terr_colors[i];
-			hgt_rngs_ft[i * 2] = MET2FEET(color->min_hgt);
-			hgt_rngs_ft[i * 2 + 1] = MET2FEET(color->max_hgt);
-			for (int j = 0; j < 4; j++)
-				hgt_colors[i * 4 + j] = color->rgba[j];
-		}
-		glUniform2fv(glGetUniformLocation(DEM_prog, "hgt_rngs_ft"),
-		    4 * 2, hgt_rngs_ft);
-		glUniform4fv(glGetUniformLocation(DEM_prog, "hgt_colors"),
-		    4 * 4, hgt_colors);
-
-		glBegin(GL_QUADS);
-		for (int i = 0; i < 4; i++) {
-			glTexCoord2f(t[i].x, t[i].y);
-			glVertex2f(v[i].x, v[i].y);
-		}
-		glEnd();
+		glutils_init_2D_quads(&quads, v, t, 4);
+		glutils_draw_quads(&quads);
+		glutils_destroy_quads(&quads);
 	}
 	mutex_exit(&dem_tile_cache_lock);
 

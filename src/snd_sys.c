@@ -81,6 +81,8 @@ static snd_t sounds[NUM_SOUNDS] = {
 	{ .filename = "ra/boeing/400.opus", .base_gain = 0.35 },
 	/* SND_RA_500_BOEING */
 	{ .filename = "ra/boeing/500.opus", .base_gain = 0.35 },
+	/* SND_RA_500_GARMIN */
+	{ .filename = "ra/garmin/500.opus", .base_gain = 1 },
 	/* SND_RA_1000_BOEING */
 	{ .filename = "ra/boeing/1000.opus", .base_gain = 0.35 },
 	/* SND_RA_2500_BOEING */

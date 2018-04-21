@@ -35,7 +35,8 @@ find data -iname '*.flac' | while read; do
 	fi
 done
 
-find data -iname '*.opus' -or -iname '*.glsl' | while read; do
+find data -iname '*.opus' -or -iname '*.vert' -or -iname '*.frag' | \
+    while read; do
 	$INSTALL -- "$REPLY" "$OUTPUT_DIR/$REPLY"
 done
 

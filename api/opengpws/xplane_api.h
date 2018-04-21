@@ -153,6 +153,8 @@ typedef struct {
 	void (*get_impact_pts)(egpws_impact_t *imp);
 	void (*terr_probe)(egpws_terr_probe_t *probe);
 	bool_t (*terr_have_data)(geo_pos2_t pos, double *tile_load_res);
+	/* Debugging support */
+	void (*reload_gl_progs)(void);
 } egpws_intf_t;
 
 enum {

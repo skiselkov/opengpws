@@ -99,7 +99,8 @@ static egpws_intf_t intf = {
 	.set_sound_inh = snd_sys_set_inh,
 	.get_impact_pts = egpws_get_impact_points,
 	.terr_probe = terr_probe,
-	.terr_have_data = terr_have_data
+	.terr_have_data = terr_have_data,
+	.reload_gl_progs = terr_reload_gl_progs
 };
 
 static int
@@ -308,7 +309,7 @@ XPluginEnable(void)
 	    "sim/cockpit2/radios/indicators/hsi_flag_glideslope_copilot");
 
 	/* We initialize this early, as OpenWXR can call us for terrain */
-	terr_init(xpdir, plugindir);
+	terr_init();
 
 	XPLMRegisterFlightLoopCallback(sensor_cb, SENSOR_INTVAL, NULL);
 	XPLMRegisterDrawCallback(sound_cb, xplm_Phase_FirstScene, 1, NULL);

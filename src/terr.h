@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-void terr_init(const char *xpdir, const char *plugindir);
+void terr_init(void);
 void terr_fini(void);
 
 void terr_set_pos(geo_pos3_t pos);
@@ -37,6 +37,8 @@ void terr_probe(egpws_terr_probe_t *probe);
 bool_t terr_have_data(geo_pos2_t pos, double *tile_load_res);
 
 void terr_render(const egpws_render_t *render);
+
+void terr_reload_gl_progs(void);
 
 #ifdef __cplusplus
 }

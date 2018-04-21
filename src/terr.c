@@ -109,7 +109,6 @@ static bool_t inited = B_FALSE;
 static list_t srch_paths;
 
 static char *dsf_paths[180][360];
-static char *xpdir = NULL;
 
 static mutex_t glob_pos_lock;
 static geo_pos3_t glob_pos = NULL_GEO_POS3;
@@ -615,7 +614,8 @@ append_cust_srch_paths(void)
 	char **lines;
 	size_t n_lines;
 
-	contents = file2str(xpdir, "Custom Scenery", "scenery_packs.ini", NULL);
+	contents = file2str(get_xpdir(), "Custom Scenery",
+	    "scenery_packs.ini", NULL);
 
 	if (contents == NULL)
 		return;
@@ -631,7 +631,7 @@ append_cust_srch_paths(void)
 			continue;
 		strlcpy(buf, &lines[i][12], sizeof (buf));
 		strip_space(buf);
-		subpath = mkpathname(xpdir, buf, "Earth nav data", NULL);
+		subpath = mkpathname(get_xpdir(), buf, "Earth nav data", NULL);
 
 		if (file_exists(subpath, &is_dir) && is_dir) {
 			srch_path_t *path = safe_calloc(1, sizeof (*path));
@@ -649,7 +649,7 @@ append_cust_srch_paths(void)
 static void
 append_glob_srch_paths(void)
 {
-	char *path = mkpathname(xpdir, "Global Scenery", NULL);
+	char *path = mkpathname(get_xpdir(), "Global Scenery", NULL);
 	DIR *dp = opendir(path);
 	struct dirent *de;
 
@@ -727,14 +727,10 @@ load_dem_worker(void *unused)
 }
 
 void
-terr_init(const char *the_xpdir, const char *plugindir)
+terr_init(void)
 {
-	char *vtx_prog_path, *frag_prog_path;
-
 	ASSERT(!inited);
 	inited = B_TRUE;
-
-	xpdir = strdup(the_xpdir);
 
 	mutex_init(&glob_pos_lock);
 
@@ -750,12 +746,7 @@ terr_init(const char *the_xpdir, const char *plugindir)
 	worker_init(&load_dem_worker_wk, load_dem_worker,
 	    SEC2USEC(LOAD_DEM_WORKER_INTVAL), NULL, "OpenGPWS_terr_wk");
 
-	vtx_prog_path = mkpathname(xpdir, plugindir, "data", "DEM.vert", NULL);
-	frag_prog_path = mkpathname(xpdir, plugindir, "data", "DEM.frag", NULL);
-	DEM_prog = shader_prog_from_file("DEM_shader", vtx_prog_path,
-	    frag_prog_path, NULL);
-	lacf_free(vtx_prog_path);
-	lacf_free(frag_prog_path);
+	terr_reload_gl_progs();
 }
 
 void
@@ -802,8 +793,6 @@ terr_fini(void)
 		glDeleteProgram(DEM_prog);
 		DEM_prog = 0;
 	}
-
-	free(xpdir);
 }
 
 void
@@ -1008,6 +997,9 @@ draw_tiles(const egpws_render_t *render)
 
 	glUniformMatrix4fv(glGetUniformLocation(DEM_prog, "pvm"),
 	    1, GL_FALSE, (GLfloat *)pvm);
+	glUniform1i(glGetUniformLocation(DEM_prog, "tex"), 0);
+	glUniform1f(glGetUniformLocation(DEM_prog, "acf_elev_ft"),
+	    MET2FEET(glob_pos.elev));
 	glUniform2fv(glGetUniformLocation(DEM_prog, "hgt_rngs_ft"),
 	    4 * 2, hgt_rngs_ft);
 	glUniform4fv(glGetUniformLocation(DEM_prog, "hgt_colors"),
@@ -1034,10 +1026,6 @@ draw_tiles(const egpws_render_t *render)
 			v[i] = vect2_scmul(v[i], render->scale);
 
 		glBindTexture(GL_TEXTURE_2D, tile->tex[tile->cur_tex]);
-
-		glUniform1i(glGetUniformLocation(DEM_prog, "tex"), 0);
-		glUniform1f(glGetUniformLocation(DEM_prog, "acf_elev_ft"),
-		    MET2FEET(glob_pos.elev));
 
 		glutils_init_2D_quads(&quads, v, t, 4);
 		glutils_draw_quads(&quads);
@@ -1223,4 +1211,26 @@ terr_have_data(geo_pos2_t pos, double *tile_load_res)
 		return (B_TRUE);
 	}
 	return (B_FALSE);
+}
+
+void
+terr_reload_gl_progs(void)
+{
+	char *vtx_path, *frag_path;
+	GLuint prog;
+
+	vtx_path = mkpathname(get_xpdir(), get_plugindir(), "data",
+	    "DEM.vert", NULL);
+	frag_path = mkpathname(get_xpdir(), get_plugindir(), "data",
+	    "DEM.frag", NULL);
+	prog = shader_prog_from_file("DEM_shader", vtx_path, frag_path,
+	    DEFAULT_VTX_ATTRIB_BINDINGS, NULL);
+	lacf_free(vtx_path);
+	lacf_free(frag_path);
+
+	if (prog != 0) {
+		if (DEM_prog != 0)
+			glDeleteProgram(DEM_prog);
+		DEM_prog = prog;
+	}
 }

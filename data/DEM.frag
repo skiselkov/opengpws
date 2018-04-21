@@ -18,12 +18,12 @@
 
 #version 120
 
-uniform sampler2D tex;
-uniform float acf_elev_ft;
-uniform vec2 hgt_rngs_ft[4];
-uniform vec4 hgt_colors[4];
+uniform sampler2D	tex;
+uniform float		acf_elev_ft;
+uniform vec2		hgt_rngs_ft[4];
+uniform vec4		hgt_colors[4];
 
-varying vec2	tex_coord;
+varying vec2		tex_coord;
 
 float
 m2ft(float m)

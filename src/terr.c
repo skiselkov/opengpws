@@ -1028,7 +1028,7 @@ draw_tiles(const egpws_render_t *render)
 		glBindTexture(GL_TEXTURE_2D, tile->tex[tile->cur_tex]);
 
 		glutils_init_2D_quads(&quads, v, t, 4);
-		glutils_draw_quads(&quads);
+		glutils_draw_quads(&quads, DEM_prog);
 		glutils_destroy_quads(&quads);
 	}
 	mutex_exit(&dem_tile_cache_lock);

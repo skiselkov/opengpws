@@ -425,7 +425,7 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 	    iter_fract(ABS(d_trk), 0, RTC_MAX_D_TRK_RATE, B_TRUE));
 	double hgt_samples[num_sim_steps];
 	geo_pos3_t terr_pos[num_sim_steps * 9];
-	geo_pos3_t imp_pts[18];
+	geo_pos3_t imp_pts[EGPWS_MAX_NUM_IMP_PTS];
 	int num_imp_pts = 0;
 	bool_t caut_found = B_FALSE, warn_found = B_FALSE;
 	double min_hgt = 1e10;

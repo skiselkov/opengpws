@@ -125,9 +125,10 @@ typedef enum {
 	EGPWS_ADVISORY_PULL_UP		/* Caused by proximity to terrain */
 } egpws_advisory_t;
 
+enum { EGPWS_MAX_NUM_IMP_PTS = 32 };
 typedef struct {
 	int		num_points;
-	geo_pos3_t	points[32];
+	geo_pos3_t	points[EGPWS_MAX_NUM_IMP_PTS];
 } egpws_impact_t;
 
 typedef struct {

@@ -971,3 +971,9 @@ egpws_get_impact_points(egpws_impact_t *imp)
 	memcpy(imp, &glob_data.imp, sizeof (*imp));
 	mutex_exit(&glob_data.lock);
 }
+
+bool_t
+egpws_is_inited(void)
+{
+	return (inited);
+}

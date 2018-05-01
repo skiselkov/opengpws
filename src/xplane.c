@@ -100,7 +100,8 @@ static egpws_intf_t intf = {
 	.get_impact_pts = egpws_get_impact_points,
 	.terr_probe = terr_probe,
 	.terr_have_data = terr_have_data,
-	.reload_gl_progs = terr_reload_gl_progs
+	.reload_gl_progs = terr_reload_gl_progs,
+	.is_inited = egpws_is_inited
 };
 
 static int

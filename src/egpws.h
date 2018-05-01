@@ -34,6 +34,7 @@ void egpws_set_flaps_ovrd(bool_t flag);
 const egpws_conf_t *egpws_get_conf(void);
 egpws_advisory_t egpws_get_advisory(void);
 void egpws_get_impact_points(egpws_impact_t *imp);
+bool_t egpws_is_inited(void);
 
 #ifdef __cplusplus
 }

@@ -156,6 +156,7 @@ typedef struct {
 	bool_t (*terr_have_data)(geo_pos2_t pos, double *tile_load_res);
 	/* Debugging support */
 	void (*reload_gl_progs)(void);
+	bool_t (*is_inited)(void);
 } egpws_intf_t;
 
 enum {

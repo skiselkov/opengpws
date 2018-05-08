@@ -35,6 +35,7 @@ typedef struct {
 static bool_t inited = B_FALSE;
 static alc_t *alc = NULL;
 static mutex_t lock;
+static bool_t sound_supp = B_FALSE;
 static bool_t sound_inh = B_FALSE;
 static snd_t sounds[NUM_SOUNDS] = {
 	/* SND_TERR_AHEAD_PUP */
@@ -185,6 +186,15 @@ snd_sys_floop_cb(void)
 	for (snd_id_t snd_id = 0; snd_id < NUM_SOUNDS; snd_id++) {
 		snd_t *snd = &sounds[snd_id];
 
+		/* Audio suppressed, stop the WAV and reschedule for later */
+		if (sound_supp) {
+			if (wav_is_playing(snd->wav)) {
+				wav_stop(snd->wav);
+				snd->play = B_TRUE;
+			}
+			continue;
+		}
+
 		if (wav_is_playing(snd->wav) && snd_id < highest_playing)
 			highest_playing = snd_id;
 
@@ -238,4 +248,10 @@ void
 snd_sys_set_inh(bool_t flag)
 {
 	sound_inh = flag;
+}
+
+void
+snd_sys_set_supp(bool_t flag)
+{
+	sound_supp = flag;
 }

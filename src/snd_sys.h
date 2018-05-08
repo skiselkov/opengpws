@@ -66,6 +66,7 @@ void snd_sys_floop_cb(void);
 void sched_sound(snd_id_t snd);
 void unsched_sound(snd_id_t snd);
 void snd_sys_set_inh(bool_t flag);
+void snd_sys_set_supp(bool_t flag);
 
 #ifdef __cplusplus
 }

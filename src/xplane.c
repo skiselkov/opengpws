@@ -97,6 +97,7 @@ static egpws_intf_t intf = {
 	.terr_render = terr_render,
 	.get_advisory = egpws_get_advisory,
 	.set_sound_inh = snd_sys_set_inh,
+	.set_sound_supp = snd_sys_set_supp,
 	.get_impact_pts = egpws_get_impact_points,
 	.terr_probe = terr_probe,
 	.terr_have_data = terr_have_data,

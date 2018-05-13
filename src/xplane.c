@@ -99,10 +99,12 @@ static egpws_intf_t intf = {
 	.set_sound_inh = snd_sys_set_inh,
 	.set_sound_supp = snd_sys_set_supp,
 	.get_impact_pts = egpws_get_impact_points,
+	.get_obst_impact_pts = egpws_get_obst_impact_pts,
 	.terr_probe = terr_probe,
 	.terr_have_data = terr_have_data,
 	.reload_gl_progs = terr_reload_gl_progs,
-	.is_inited = egpws_is_inited
+	.is_inited = egpws_is_inited,
+	.set_odb = egpws_set_odb
 };
 
 static int

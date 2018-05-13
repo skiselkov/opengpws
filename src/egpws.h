@@ -30,10 +30,12 @@ void egpws_fini(void);
 void egpws_set_position(egpws_pos_t pos, double now);
 void egpws_set_dest(const egpws_arpt_ref_t *ref);
 void egpws_set_flaps_ovrd(bool_t flag);
+void egpws_set_odb(odb_t *odb);
 
 const egpws_conf_t *egpws_get_conf(void);
 egpws_advisory_t egpws_get_advisory(void);
 void egpws_get_impact_points(egpws_impact_t *imp);
+void egpws_get_obst_impact_pts(egpws_obst_impact_t *imp);
 bool_t egpws_is_inited(void);
 
 #ifdef __cplusplus

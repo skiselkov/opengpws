@@ -42,6 +42,9 @@
 #define	NCR_SUPRESS_CLB_RATE	FPM2MPS(300)
 #define	D_TRK_UPD_RATE		2		/* seconds */
 #define	ARPT_LOAD_LIMIT		NM2MET(23)
+#define	OBST_REFRESH_INTVAL	10		/* seconds */
+#define	OBST_DIST_RANGE		20000		/* meters */
+#define	OBST_HGT_RANGE		1000		/* meters */
 
 static bool_t		inited = B_FALSE;
 static bool_t		main_shutdown = B_FALSE;
@@ -64,8 +67,11 @@ static struct {
 } glob_data;
 
 static struct {
+	odb_t			*odb;
 	mutex_t			adv_lock;
 	egpws_advisory_t	adv;
+	list_t			obstacles;
+	time_t			obst_refresh_t;
 	struct {
 		struct {
 			double last_caut_vs;
@@ -92,8 +98,25 @@ static struct {
 			bool_t		ahead_played;
 			double		last_caut_time;
 		} rtc;
+		struct {
+			/* protected by adv_lock */
+			egpws_obst_impact_t	imp;
+		} roc;
 	} tawsb;
-} state;
+} state = { NULL };
+
+typedef struct {
+	geo_pos3_t	pos;
+	vect3_t		pos_ecef;
+	double		agl;
+	unsigned	quant;
+	list_node_t	node;
+} obst_t;
+
+typedef struct {
+	geo_pos3_t	pos;
+	vect3_t		ecef;
+} pos_info_t;
 
 static void
 egpws_boot(void)
@@ -159,7 +182,7 @@ mk8_mode1(const egpws_pos_t *pos)
 
 	if (pos->vs > warn_vs) {
 		sched_sound(SND_PUP);
-		state.adv = MAX(state.adv, EGPWS_ADVISORY_PULL_UP);
+		state.adv = MAX(state.adv, EGPWS_ADVISORY_PULL_UP_TERRAIN);
 	} else if (pos->vs >= caut_vs) {
 		double next_caut_vs;
 		double caut_vs_20pct = caut_vs * 0.2;
@@ -386,7 +409,7 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 #define	RTC_SIM_STEP		1			/* second */
 #define	RTC_NUM_STEPS_MAX	(45 / RTC_SIM_STEP)	/* simulate 35s */
 #define	RTC_NUM_STEPS_MIN	(30 / RTC_SIM_STEP)	/* simulate 20s */
-#define	RTC_WARN_STEP_FRACT	0.8
+#define	RTC_WARN_STEP_FRACT	0.7
 #define	RTC_MAX_D_TRK_RATE	3			/* deg/s */
 #define	RTC_DES_THRESH		FPM2MPS(-300)
 #define	RTC_INH_DIST_THRESH	NM2MET(0.5)
@@ -394,6 +417,11 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 #define	RTC_CAUT_INTVAL		5			/* seconds */
 #define	RTC_RISING_TERR_THRESH	FEET2MET(150)
 #define	MIN_IMPACT_PTS		5
+#define	MAX_OBSTACLES		1024
+#define	OBST_LAT_CLR_MIN	150			/* meters */
+#define	OBST_LAT_CLR_MAX	300			/* meters */
+#define	OBST_LAT_BLOOM_BASE_AGL	150			/* meters */
+#define	OBST_LAT_BLOOM_MAX_MULT	4
 
 	static const vect2_t lvl_curve[] = {
 		VECT2(0,		0),
@@ -426,9 +454,15 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 	double hgt_samples[num_sim_steps];
 	geo_pos3_t terr_pos[num_sim_steps * 9];
 	geo_pos3_t imp_pts[EGPWS_MAX_NUM_IMP_PTS];
+	geo_pos3_t caut_obst[MAX_OBSTACLES];
+	geo_pos3_t warn_obst[MAX_OBSTACLES];
 	int num_imp_pts = 0;
+	int num_caut_obst = 0;
+	int num_warn_obst = 0;
 	bool_t caut_found = B_FALSE, warn_found = B_FALSE;
+	bool_t caut_obst_found = B_FALSE, warn_obst_found = B_FALSE;
 	double min_hgt = 1e10;
+	egpws_obst_impact_t *obst_imp = &state.tawsb.roc.imp;
 
 	if (pos->on_gnd) {
 		clear_impact();
@@ -463,6 +497,8 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 		geo_pos2_t gp = fpp2geo(p, &fpp);
 		double terr_elev = terr_get_elev_wide(gp, &terr_pos[i * 9]);
 		vect2_t vel;
+		vect3_t ecef = geo2ecef(GEO2_TO_GEO3(gp, pos->pos.elev),
+		    &wgs84);
 
 		ASSERT(!IS_NULL_GEO_POS(gp));
 
@@ -471,6 +507,32 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 		hgt_samples[i] = pos->pos.elev - terr_elev;
 		if (i == 0)
 			cur_hgt = hgt_samples[i];
+
+		for (obst_t *obst = list_head(&state.obstacles);
+		    obst != NULL; obst = list_next(&state.obstacles, obst)) {
+			double obst_dist =
+			    vect3_abs(vect3_sub(ecef, obst->pos_ecef));
+			double rqd_lat_clr = wavg(
+			    OBST_LAT_CLR_MIN, OBST_LAT_CLR_MAX,
+			    iter_fract(obst->quant, 1, 3, B_TRUE));
+			double d_elev = pos->pos.elev -
+			    (obst->pos.elev + obst->agl);
+
+			rqd_lat_clr *= clamp(
+			    obst->agl / OBST_LAT_BLOOM_BASE_AGL,
+			    1, OBST_LAT_BLOOM_MAX_MULT);
+
+			if (obst_dist < rqd_lat_clr && d_elev < coll_clr &&
+			    num_warn_obst < MAX_OBSTACLES &&
+			    i < num_sim_steps * RTC_WARN_STEP_FRACT) {
+				warn_obst[num_warn_obst] = obst->pos;
+				num_warn_obst++;
+			} else if (obst_dist < rqd_lat_clr &&
+			    d_elev < rqd_clr && num_caut_obst < MAX_OBSTACLES) {
+				caut_obst[num_caut_obst] = obst->pos;
+				num_caut_obst++;
+			}
+		}
 
 		/* Integrate our position variables */
 		trk += d_trk * RTC_SIM_STEP;
@@ -515,6 +577,29 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 		min_hgt = MIN(min_hgt, hgt_samples[i]);
 	}
 
+	obst_imp->num_points = 0;
+	for (int i = 0; i < num_warn_obst &&
+	    obst_imp->num_points < EGPWS_MAX_NUM_OBST_IMP_PTS; i++) {
+		obst_imp->points[obst_imp->num_points] = warn_obst[i];
+		obst_imp->is_warn[obst_imp->num_points] = B_TRUE;
+		obst_imp->num_points++;
+	}
+	for (int i = 0; i < num_caut_obst &&
+	    obst_imp->num_points < EGPWS_MAX_NUM_OBST_IMP_PTS; i++) {
+		obst_imp->points[obst_imp->num_points] = caut_obst[i];
+		obst_imp->is_warn[obst_imp->num_points] = B_FALSE;
+		obst_imp->num_points++;
+	}
+	warn_obst_found = (num_warn_obst > 0);
+	caut_obst_found = (num_caut_obst > 0);
+
+	/*
+	 * Priority of messages:
+	 * 1) Terrain warnings (PULL UP)
+	 * 2) Obstacle warnings (PULL UP)
+	 * 3) Terrain cautions (TERRAIN AHEAD)
+	 * 4) Obstacle cautions (OBSTACLE AHEAD)
+	 */
 	if (warn_found) {
 		dbg_log(rtc, 1, "rtc| min_hgt:%.0f  rqd:%.0f  coll:%.0f = "
 		    "PULL UP", min_hgt, rqd_clr, coll_clr);
@@ -523,13 +608,22 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 			state.tawsb.rtc.ahead_played = B_TRUE;
 		}
 		sched_sound(SND_PUP);
-		state.adv = MAX(state.adv, EGPWS_ADVISORY_PULL_UP);
+		state.adv = MAX(state.adv, EGPWS_ADVISORY_PULL_UP_TERRAIN);
+	} else if (warn_obst_found) {
+		dbg_log(rtc, 1, "rtc| num_warn_obst: %d = PULL UP",
+		    num_warn_obst);
+		if (!state.tawsb.rtc.ahead_played) {
+			sched_sound(SND_OBST_AHEAD_PUP);
+			state.tawsb.rtc.ahead_played = B_TRUE;
+		}
+		sched_sound(SND_PUP);
+		state.adv = MAX(state.adv, EGPWS_ADVISORY_PULL_UP_OBSTACLE);
 	} else if (caut_found) {
 		snd_id_t snd;
 		double now = USEC2SEC(microclock());
+
 		dbg_log(rtc, 1, "rtc| min_hgt:%.0f  rqd:%.0f  coll:%.0f = "
 		    "TERR AHEAD", min_hgt, rqd_clr, coll_clr);
-
 		if (cur_hgt - min_hgt < RTC_RISING_TERR_THRESH)
 			snd = SND_TOO_LOW_TERR;
 		else
@@ -541,6 +635,16 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 			state.tawsb.rtc.last_caut_time = now;
 		}
 		state.tawsb.rtc.ahead_played = B_FALSE;
+	} else if (caut_obst_found) {
+		double now = USEC2SEC(microclock());
+
+		dbg_log(rtc, 1, "rtc| num_caut_obst: %d = PULL UP",
+		    num_caut_obst);
+		if (now - state.tawsb.rtc.last_caut_time > RTC_CAUT_INTVAL) {
+			sched_sound(SND_OBST_AHEAD);
+			state.tawsb.rtc.last_caut_time = now;
+		}
+		state.adv = MAX(state.adv, EGPWS_ADVISORY_OBSTACLE);
 	} else {
 		dbg_log(rtc, 1, "rtc| min_hgt:%.0f  rqd: %.0f  coll:%.0f = OK",
 		    min_hgt, rqd_clr, coll_clr);
@@ -801,6 +905,58 @@ tawsb(const egpws_pos_t *pos, const egpws_arpt_ref_t *dest, double d_trk)
 }
 
 static void
+add_obst_cb(obst_type_t type, geo_pos3_t pos, float agl, obst_light_t light,
+    unsigned quant, void *userinfo)
+{
+	obst_t *obst;
+	vect3_t pos_ecef = geo2ecef(pos, &wgs84);
+	const pos_info_t *pos_info = userinfo;
+
+	UNUSED(type);
+	UNUSED(light);
+
+	if (vect3_abs(vect3_sub(pos_ecef, pos_info->ecef)) > OBST_DIST_RANGE ||
+	    pos_info->pos.elev - (pos.elev + agl) > OBST_HGT_RANGE)
+		return;
+
+	obst = calloc(1, sizeof (*obst));
+	obst->pos = pos;
+	obst->pos_ecef = pos_ecef;
+	obst->agl = agl;
+	obst->quant = quant;
+
+	list_insert_tail(&state.obstacles, obst);
+}
+
+static void
+gather_obstacles(egpws_pos_t *pos)
+{
+	time_t now = time(NULL);
+	obst_t *obst;
+	int lat = floor(pos->pos.lat), lon = floor(pos->pos.lon);
+	pos_info_t pos_info = {
+	    .pos = pos->pos, .ecef = geo2ecef(pos->pos, &wgs84)
+	};
+
+	if (state.odb == NULL)
+		return;
+
+	if (now - state.obst_refresh_t < OBST_REFRESH_INTVAL)
+		return;
+	state.obst_refresh_t = now;
+
+	while ((obst = list_remove_head(&state.obstacles)) != NULL)
+		free(obst);
+
+	for (int lat_i = -1; lat_i <= 1; lat_i++) {
+		for (int lon_i = -1; lon_i <= 1; lon_i++) {
+			odb_get_obstacles(state.odb, lat + lat_i, lon + lon_i,
+			    add_obst_cb, &pos_info);
+		}
+	}
+}
+
+static void
 main_loop(void)
 {
 	uint64_t now = microclock();
@@ -827,6 +983,7 @@ main_loop(void)
 
 		mutex_enter(&state.adv_lock);
 		state.adv = EGPWS_ADVISORY_NONE;
+		gather_obstacles(&pos);
 		if (conf.type == EGPWS_MK_VIII)
 			mk8_mode1(&pos);
 		else
@@ -863,6 +1020,8 @@ egpws_init(const egpws_conf_t *acf_conf)
 	mutex_init(&state.adv_lock);
 	glob_data.pos.pos = NULL_GEO_POS3;
 
+	list_create(&state.obstacles, sizeof (obst_t), offsetof(obst_t, node));
+
 	dbg_log(egpws, 3, "EGPWS type: %s",
 	    conf.type == EGPWS_MK_VIII ? "MK VIII" : "TAWS-B");
 
@@ -874,6 +1033,8 @@ egpws_init(const egpws_conf_t *acf_conf)
 void
 egpws_fini(void)
 {
+	obst_t *obst;
+
 	dbg_log(egpws, 1, "fini");
 
 	if (!inited)
@@ -886,10 +1047,15 @@ egpws_fini(void)
 
 	thread_join(&worker);
 
+	while ((obst = list_remove_head(&state.obstacles)) != NULL)
+		free(obst);
+
 	mutex_destroy(&state.adv_lock);
 	mutex_destroy(&glob_data.lock);
 	mutex_destroy(&lock);
 	cv_destroy(&cv);
+
+	memset(&state, 0, sizeof (state));
 
 	inited = B_FALSE;
 }
@@ -932,6 +1098,17 @@ egpws_set_flaps_ovrd(bool_t flag)
 }
 
 void
+egpws_set_odb(odb_t *odb)
+{
+	ASSERT(inited);
+	if (state.odb != odb) {
+		mutex_enter(&state.adv_lock);
+		state.odb = odb;
+		mutex_exit(&state.adv_lock);
+	}
+}
+
+void
 egpws_set_dest(const egpws_arpt_ref_t *ref)
 {
 	mutex_enter(&glob_data.lock);
@@ -970,6 +1147,15 @@ egpws_get_impact_points(egpws_impact_t *imp)
 	mutex_enter(&glob_data.lock);
 	memcpy(imp, &glob_data.imp, sizeof (*imp));
 	mutex_exit(&glob_data.lock);
+}
+
+void
+egpws_get_obst_impact_pts(egpws_obst_impact_t *imp)
+{
+	ASSERT(inited);
+	mutex_enter(&state.adv_lock);
+	memcpy(imp, &state.tawsb.roc.imp, sizeof (*imp));
+	mutex_exit(&state.adv_lock);
 }
 
 bool_t

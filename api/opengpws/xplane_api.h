@@ -21,8 +21,9 @@
 
 #include <GL/glew.h>
 
-#include <acfutils/geom.h>
 #include <acfutils/avl.h>
+#include <acfutils/geom.h>
+#include <acfutils/odb.h>
 #include <acfutils/thread.h>
 
 #ifdef __cplusplus
@@ -121,8 +122,10 @@ typedef enum {
 	EGPWS_ADVISORY_NONE,
 	EGPWS_ADVISORY_SINKRATE_DR,	/* Caused by descent rate */
 	EGPWS_ADVISORY_PULL_UP_DR,	/* Caused by descent rate */
+	EGPWS_ADVISORY_OBSTACLE,	/* Caused by proximity to obstacles */
 	EGPWS_ADVISORY_TERRAIN,		/* Caused by proximity to terrain */
-	EGPWS_ADVISORY_PULL_UP		/* Caused by proximity to terrain */
+	EGPWS_ADVISORY_PULL_UP_OBSTACLE,/* Caused by proximity to terrain */
+	EGPWS_ADVISORY_PULL_UP_TERRAIN	/* Caused by proximity to terrain */
 } egpws_advisory_t;
 
 enum { EGPWS_MAX_NUM_IMP_PTS = 32 };
@@ -130,6 +133,13 @@ typedef struct {
 	int		num_points;
 	geo_pos3_t	points[EGPWS_MAX_NUM_IMP_PTS];
 } egpws_impact_t;
+
+enum { EGPWS_MAX_NUM_OBST_IMP_PTS = 128 };
+typedef struct {
+	int		num_points;
+	geo_pos3_t	points[EGPWS_MAX_NUM_OBST_IMP_PTS];
+	bool_t		is_warn[EGPWS_MAX_NUM_OBST_IMP_PTS];
+} egpws_obst_impact_t;
 
 typedef struct {
 	unsigned		num_pts;
@@ -153,11 +163,13 @@ typedef struct {
 	void (*set_sound_inh)(bool_t flag);
 	void (*set_sound_supp)(bool_t flag);
 	void (*get_impact_pts)(egpws_impact_t *imp);
+	void (*get_obst_impact_pts)(egpws_obst_impact_t *imp);
 	void (*terr_probe)(egpws_terr_probe_t *probe);
 	bool_t (*terr_have_data)(geo_pos2_t pos, double *tile_load_res);
 	/* Debugging support */
 	void (*reload_gl_progs)(void);
 	bool_t (*is_inited)(void);
+	void (*set_odb)(odb_t *odb);
 } egpws_intf_t;
 
 enum {

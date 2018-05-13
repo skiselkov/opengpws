@@ -161,7 +161,9 @@ else()
 	    ${LIBACFUTILS}/libpng/libpng-linux-64/lib
 	    ${LIBACFUTILS}/lzma/qmake/linux-64
 	    ${LIBACFUTILS}/shapelib/libshape-linux-64/lib
-	    ${LIBACFUTILS}/shapelib/libproj-linux-64/lib)
+	    ${LIBACFUTILS}/shapelib/libproj-linux-64/lib
+	    ${LIBACFUTILS}/curl/libcurl-linux-64/lib
+	    ${LIBACFUTILS}/ssl/openssl-linux-64/lib)
 	FIND_LIBRARY(LIBACFUTILS_LIBRARY acfutils)
 	FIND_LIBRARY(OPUSFILE_LIBRARY opusfile)
 	FIND_LIBRARY(OPUS_LIBRARY opus)
@@ -176,8 +178,14 @@ else()
 	FIND_LIBRARY(LIBC_NONSHARED c_nonshared)
 	FIND_LIBRARY(PROJ_LIBRARY proj)
 	FIND_LIBRARY(SHP_LIBRARY shp)
+	FIND_LIBRARY(CURL_LIBRARY curl)
+	FIND_LIBRARY(SSL_LIBRARY ssl)
+	FIND_LIBRARY(CRYPTO_LIBRARY crypto)
 	target_link_libraries(opengpws
 	    ${LIBACFUTILS_LIBRARY}
+	    ${CURL_LIBRARY}
+	    ${SSL_LIBRARY}
+	    ${CRYPTO_LIBRARY}
 	    ${OPUSFILE_LIBRARY}
 	    ${OPUS_LIBRARY}
 	    ${OGG_LIBRARY}

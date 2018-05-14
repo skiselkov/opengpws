@@ -413,15 +413,15 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 #define	RTC_MAX_D_TRK_RATE	3			/* deg/s */
 #define	RTC_DES_THRESH		FPM2MPS(-300)
 #define	RTC_INH_DIST_THRESH	NM2MET(0.5)
-#define	RTC_INH_HGT_THRESH	FEET2MET(200)
+#define	RTC_INH_HGT_THRESH	FEET2MET(250)
 #define	RTC_CAUT_INTVAL		5			/* seconds */
 #define	RTC_RISING_TERR_THRESH	FEET2MET(150)
 #define	MIN_IMPACT_PTS		5
 #define	MAX_OBSTACLES		1024
 #define	OBST_LAT_CLR_MIN	150			/* meters */
-#define	OBST_LAT_CLR_MAX	300			/* meters */
+#define	OBST_LAT_CLR_MAX	250			/* meters */
 #define	OBST_LAT_BLOOM_BASE_AGL	150			/* meters */
-#define	OBST_LAT_BLOOM_MAX_MULT	4
+#define	OBST_LAT_BLOOM_MAX_MULT	2
 
 	static const vect2_t lvl_curve[] = {
 		VECT2(0,		0),
@@ -445,13 +445,31 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 		VECT2(1e11,		FEET2MET(100)),
 		NULL_VECT2
 	};
+	/*
+	 * Correction curve based on airport proximity. The closer we are
+	 * to our destination the tighter the simulation time limit is.
+	 */
+	static const vect2_t dist2time_curve[] = {
+		VECT2(NM2MET(0),	0.5),
+		VECT2(NM2MET(0.5),	0.5),
+		VECT2(NM2MET(3),	1.0),
+		VECT2(NM2MET(10),	1.0),
+		NULL_VECT2
+	};
 	double rqd_clr, coll_clr, trk, arpt_dist, arpt_rel_hgt;
 	fpp_t fpp;
 	vect2_t p;
 	double cur_hgt = NAN;
-	int num_sim_steps = wavg(RTC_NUM_STEPS_MAX, RTC_NUM_STEPS_MIN,
-	    iter_fract(ABS(d_trk), 0, RTC_MAX_D_TRK_RATE, B_TRUE));
-	double hgt_samples[num_sim_steps];
+	int num_sim_steps = round(wavg(RTC_NUM_STEPS_MAX, RTC_NUM_STEPS_MIN,
+	    iter_fract(ABS(d_trk), 0, RTC_MAX_D_TRK_RATE, B_TRUE)));
+	/*
+	 * We store two sets of height samples, one set used for cautions and
+	 * one for warnings. The caution samples are computed assuming the
+	 * aircraft will always remain level, or at most is descending at
+	 * -500 fpm. The warning samples are computed assuming the aircraft
+	 * will remain level or climb at up to 1000 fpm.
+	 */
+	double hgt_samples_caut[num_sim_steps], hgt_samples_warn[num_sim_steps];
 	geo_pos3_t terr_pos[num_sim_steps * 9];
 	geo_pos3_t imp_pts[EGPWS_MAX_NUM_IMP_PTS];
 	geo_pos3_t caut_obst[MAX_OBSTACLES];
@@ -462,6 +480,7 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 	bool_t caut_found = B_FALSE, warn_found = B_FALSE;
 	bool_t caut_obst_found = B_FALSE, warn_obst_found = B_FALSE;
 	double min_hgt = 1e10;
+	double vs_caut, vs_warn;
 	egpws_obst_impact_t *obst_imp = &state.tawsb.roc.imp;
 
 	if (pos->on_gnd) {
@@ -474,12 +493,18 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 		arpt_rel_hgt = 1e10;
 	}
 
-	/* Inihibit within 0.5 NM and less than 200 ft above destination */
+	/*
+	 * Inihibit within 0.5 NM and less than 250 ft above destination.
+	 * Spec says 200 ft, but I find it's a bit too tight.
+	 */
 	if (arpt_dist < RTC_INH_DIST_THRESH &&
 	    arpt_rel_hgt < RTC_INH_HGT_THRESH) {
 		clear_impact();
 		return;
 	}
+
+	num_sim_steps = round(num_sim_steps *
+	    fx_lin_multi(arpt_dist, dist2time_curve, B_TRUE));
 
 	if (pos->vs > RTC_DES_THRESH)
 		rqd_clr = fx_lin_multi(arpt_dist, lvl_curve, B_FALSE);
@@ -492,8 +517,12 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 	trk = pos->trk;
 	p = ZERO_VECT2;
 	fpp = ortho_fpp_init(GEO3_TO_GEO2(pos->pos), 0, &wgs84, B_TRUE);
+	vs_caut = clamp(pos->vs, -FPM2MPS(500), 0);
+	vs_warn = clamp(pos->vs, 0, FPM2MPS(1000));
 
 	for (int i = 0; i < num_sim_steps; i++) {
+		double elev_caut = (pos->pos.elev + vs_caut * i * RTC_SIM_STEP);
+		double elev_warn = (pos->pos.elev + vs_warn * i * RTC_SIM_STEP);
 		geo_pos2_t gp = fpp2geo(p, &fpp);
 		double terr_elev = terr_get_elev_wide(gp, &terr_pos[i * 9]);
 		vect2_t vel;
@@ -504,9 +533,10 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 
 		if (isnan(terr_elev))
 			terr_elev = 0;
-		hgt_samples[i] = pos->pos.elev - terr_elev;
+		hgt_samples_caut[i] = elev_caut - terr_elev;
+		hgt_samples_warn[i] = elev_warn - terr_elev;
 		if (i == 0)
-			cur_hgt = hgt_samples[i];
+			cur_hgt = hgt_samples_caut[i];
 
 		for (obst_t *obst = list_head(&state.obstacles);
 		    obst != NULL; obst = list_next(&state.obstacles, obst)) {
@@ -515,20 +545,23 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 			double rqd_lat_clr = wavg(
 			    OBST_LAT_CLR_MIN, OBST_LAT_CLR_MAX,
 			    iter_fract(obst->quant, 1, 3, B_TRUE));
-			double d_elev = pos->pos.elev -
+			double d_elev_caut = elev_caut -
+			    (obst->pos.elev + obst->agl);
+			double d_elev_warn = elev_warn -
 			    (obst->pos.elev + obst->agl);
 
 			rqd_lat_clr *= clamp(
 			    obst->agl / OBST_LAT_BLOOM_BASE_AGL,
 			    1, OBST_LAT_BLOOM_MAX_MULT);
 
-			if (obst_dist < rqd_lat_clr && d_elev < coll_clr &&
+			if (obst_dist < rqd_lat_clr && d_elev_warn < coll_clr &&
 			    num_warn_obst < MAX_OBSTACLES &&
 			    i < num_sim_steps * RTC_WARN_STEP_FRACT) {
 				warn_obst[num_warn_obst] = obst->pos;
 				num_warn_obst++;
 			} else if (obst_dist < rqd_lat_clr &&
-			    d_elev < rqd_clr && num_caut_obst < MAX_OBSTACLES) {
+			    d_elev_caut < rqd_clr &&
+			    num_caut_obst < MAX_OBSTACLES) {
 				caut_obst[num_caut_obst] = obst->pos;
 				num_caut_obst++;
 			}
@@ -543,7 +576,7 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 
 	for (int i = 0; i < num_sim_steps; i++) {
 		if (i < num_sim_steps * RTC_WARN_STEP_FRACT &&
-		    hgt_samples[i] < coll_clr) {
+		    hgt_samples_warn[i] < coll_clr) {
 			num_imp_pts = xfer_imp_pts(imp_pts, &terr_pos[i * 9],
 			    pos->pos.elev, coll_clr);
 			/*
@@ -560,7 +593,7 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 			warn_found = B_TRUE;
 			break;
 		}
-		if (hgt_samples[i] < rqd_clr) {
+		if (hgt_samples_caut[i] < rqd_clr) {
 			if (!caut_found) {
 				num_imp_pts = xfer_imp_pts(imp_pts,
 				    &terr_pos[i * 9], pos->pos.elev, rqd_clr);
@@ -574,7 +607,7 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 			}
 			caut_found = B_TRUE;
 		}
-		min_hgt = MIN(min_hgt, hgt_samples[i]);
+		min_hgt = MIN(min_hgt, hgt_samples_caut[i]);
 	}
 
 	obst_imp->num_points = 0;

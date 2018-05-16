@@ -483,7 +483,9 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 	double vs_caut, vs_warn;
 	egpws_obst_impact_t *obst_imp = &state.tawsb.roc.imp;
 
-	if (pos->on_gnd) {
+	/* Validate input data */
+	if (pos->on_gnd || IS_NULL_GEO_POS(pos->pos) || isnan(pos->vs) ||
+	    isnan(pos->gs) || isnan(pos->trk)) {
 		clear_impact();
 		return;
 	}

@@ -1003,6 +1003,7 @@ main_loop(void)
 	mutex_enter(&lock);
 	while (!main_shutdown) {
 		egpws_pos_t pos;
+		geo_pos2_t pos_2d;
 		double d_trk;
 		egpws_arpt_ref_t dest;
 
@@ -1012,9 +1013,13 @@ main_loop(void)
 
 		mutex_enter(&glob_data.lock);
 		pos = glob_data.pos;
+		pos_2d = GEO3_TO_GEO2(pos.pos);
 		d_trk = glob_data.d_trk;
 		memcpy(&dest, &glob_data.dest, sizeof (dest));
 		mutex_exit(&glob_data.lock);
+
+		if (!IS_NULL_GEO_POS(pos_2d))
+			load_nearest_airport_tiles(&db, pos_2d);
 
 		mutex_enter(&state.adv_lock);
 		state.adv = EGPWS_ADVISORY_NONE;
@@ -1024,7 +1029,9 @@ main_loop(void)
 		else
 			tawsb(&pos, &dest, d_trk);
 		mutex_exit(&state.adv_lock);
-		unload_distant_airport_tiles(&db, GEO3_TO_GEO2(pos.pos));
+
+		if (!IS_NULL_GEO_POS(pos_2d))
+			unload_distant_airport_tiles(&db, pos_2d);
 
 		mutex_enter(&lock);
 out:
@@ -1043,6 +1050,7 @@ egpws_init(const egpws_conf_t *acf_conf)
 	inited = B_TRUE;
 
 	memset(&state, 0, sizeof (state));
+	state.tawsb.ncr.liftoff_pt = NULL_GEO_POS3;
 
 	main_shutdown = B_FALSE;
 	mutex_init(&lock);

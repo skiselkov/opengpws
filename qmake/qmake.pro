@@ -24,9 +24,6 @@ VERSION = 1.0.0
 
 INCLUDEPATH += $$[LIBACFUTILS]/SDK/CHeaders/XPLM
 INCLUDEPATH += $$[LIBACFUTILS]/SDK/CHeaders/Widgets
-# Always just use the shipped OpenAL headers for predictability.
-# The ABI is X-Plane-internal and stable anyway.
-INCLUDEPATH += $$[LIBACFUTILS]/OpenAL/include
 INCLUDEPATH += $$[LIBACFUTILS]/src
 INCLUDEPATH += $$[LIBACFUTILS]/acf_apis
 INCLUDEPATH += $$[LIBACFUTILS]/glew
@@ -74,15 +71,15 @@ win32 {
 
 win32:contains(CROSS_COMPILE, x86_64-w64-mingw32-) {
 	QMAKE_CFLAGS += $$system("$$[LIBACFUTILS]/pkg-config-deps win-64 \
-	    --cflags")
+	    --static-openal --cflags")
 
 	# This must go first for GCC to properly find dependent symbols
 	LIBS += $$[LIBACFUTILS]/qmake/win64/libacfutils.a
-	LIBS += $$system("$$[LIBACFUTILS]/pkg-config-deps win-64 --libs")
+	LIBS += $$system("$$[LIBACFUTILS]/pkg-config-deps win-64 \
+	    --static-openal --libs")
 
 	LIBS += -L$$[LIBACFUTILS]/SDK/Libraries/Win -lXPLM_64
 	LIBS += -L$$[LIBACFUTILS]/SDK/Libraries/Win -lXPWidgets_64
-	LIBS += -L$$[LIBACFUTILS]/OpenAL/libs/Win64 -lOpenAL32
 	LIBS += -L$$[LIBACFUTILS]/GL_for_Windows/lib -lglu32 -lopengl32
 
 	LIBS += -ldbghelp
@@ -98,30 +95,34 @@ unix:!macx {
 
 linux-g++-64 {
 	QMAKE_CFLAGS += $$system("$$[LIBACFUTILS]/pkg-config-deps linux-64 \
-	    --cflags")
+	    --static-openal --cflags")
 
 	LIBS += -L$$[LIBACFUTILS]/qmake/lin64 -lacfutils
-	LIBS += $$system("$$[LIBACFUTILS]/pkg-config-deps linux-64 --libs")
+	LIBS += $$system("$$[LIBACFUTILS]/pkg-config-deps linux-64 \
+	    --static-openal --libs")
 }
 
 macx {
 	# Prevent linking via clang++ which makes us depend on libstdc++
 	QMAKE_LINK = $$QMAKE_CC
+	QMAKE_CFLAGS += -mmacosx-version-min=10.9
+	QMAKE_LFLAGS += -mmacosx-version-min=10.9
 
 	DEFINES += APL=1 IBM=0 LIN=0
 	TARGET = mac.xpl
-	INCLUDEPATH += ../OpenAL/include
 	LIBS += -F$$[LIBACFUTILS]/SDK/Libraries/Mac
-	LIBS += -framework OpenGL -framework OpenAL -framework XPLM
-	LIBS += -framework XPWidgets
+	LIBS += -framework OpenGL -framework AudioToolbox
+	LIBS += -framework CoreAudio -framework AudioUnit
+	LIBS += -framework XPLM -framework XPWidgets
 }
 
 macx-clang {
 	QMAKE_CFLAGS += $$system("$$[LIBACFUTILS]/pkg-config-deps mac-64 \
-	    --cflags")
+	    --static-openal --cflags")
 
 	LIBS += $$[LIBACFUTILS]/qmake/mac64/libacfutils.a
-	LIBS += $$system("$$[LIBACFUTILS]/pkg-config-deps mac-64 --libs")
+	LIBS += $$system("$$[LIBACFUTILS]/pkg-config-deps mac-64 \
+	    --static-openal --libs")
 }
 
 HEADERS += ../src/*.h

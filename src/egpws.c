@@ -1024,10 +1024,17 @@ main_loop(void)
 		mutex_enter(&state.adv_lock);
 		state.adv = EGPWS_ADVISORY_NONE;
 		gather_obstacles(&pos);
-		if (conf.type == EGPWS_MK_VIII)
+		switch (conf.type) {
+		case EGPWS_MK_VIII:
 			mk8_mode1(&pos);
-		else
+			break;
+		case EGPWS_TAWS_B:
 			tawsb(&pos, &dest, d_trk);
+			break;
+		case EGPWS_DB_ONLY:
+			/* no annunciations in this mode */
+			break;
+		}
 		mutex_exit(&state.adv_lock);
 
 		if (!IS_NULL_GEO_POS(pos_2d))

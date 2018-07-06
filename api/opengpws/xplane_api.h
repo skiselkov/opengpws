@@ -68,7 +68,8 @@ typedef enum {
 
 typedef enum {
 	EGPWS_MK_VIII,
-	EGPWS_TAWS_B
+	EGPWS_TAWS_B,
+	EGPWS_DB_ONLY
 } egpws_syst_type_t;
 
 typedef struct {

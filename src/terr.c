@@ -906,6 +906,8 @@ update_tiles(void)
 {
 	mutex_enter(&dem_tile_cache_lock);
 
+	dbg_log(terr, 3, "Updating %lu tiles", avl_numnodes(&dem_tile_cache));
+
 	for (dem_tile_t *tile = avl_first(&dem_tile_cache), *next_tile = NULL;
 	    tile != NULL; tile = next_tile) {
 		int next_tex = !tile->cur_tex;

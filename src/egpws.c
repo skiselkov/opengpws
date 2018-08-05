@@ -1182,7 +1182,9 @@ egpws_get_advisory(void)
 {
 	egpws_advisory_t adv;
 
-	ASSERT(inited);
+	if (!inited)
+		return (EGPWS_ADVISORY_NONE);
+
 	mutex_enter(&state.adv_lock);
 	adv = state.adv;
 	mutex_exit(&state.adv_lock);
@@ -1193,7 +1195,11 @@ egpws_get_advisory(void)
 void
 egpws_get_impact_points(egpws_impact_t *imp)
 {
-	ASSERT(inited);
+	if (!inited) {
+		memset(imp, 0, sizeof (*imp));
+		return;
+	}
+
 	mutex_enter(&glob_data.lock);
 	memcpy(imp, &glob_data.imp, sizeof (*imp));
 	mutex_exit(&glob_data.lock);
@@ -1202,7 +1208,11 @@ egpws_get_impact_points(egpws_impact_t *imp)
 void
 egpws_get_obst_impact_pts(egpws_obst_impact_t *imp)
 {
-	ASSERT(inited);
+	if (!inited) {
+		memset(imp, 0, sizeof (*imp));
+		return;
+	}
+
 	mutex_enter(&state.adv_lock);
 	memcpy(imp, &state.tawsb.roc.imp, sizeof (*imp));
 	mutex_exit(&state.adv_lock);

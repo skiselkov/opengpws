@@ -279,8 +279,8 @@ static void
 tawsb_db_arpt_dist(const egpws_pos_t *pos, airport_t *arpt,
     double *arpt_dist_p, double *arpt_hgt_p)
 {
-	vect3_t my_ecef = geo2ecef(GEO3_FT2M(pos->pos), &wgs84);
-	vect3_t dest_ecef = geo2ecef(GEO3_FT2M(arpt->refpt), &wgs84);
+	vect3_t my_ecef = geo2ecef_ft(pos->pos, &wgs84);
+	vect3_t dest_ecef = geo2ecef_ft(arpt->refpt, &wgs84);
 	double dist = vect3_abs(vect3_sub(dest_ecef, my_ecef));
 	double elev = FEET2MET(arpt->refpt.elev);
 	vect2_t my_pos_2d = geo2fpp(GEO3_TO_GEO2(pos->pos), &arpt->fpp);
@@ -298,8 +298,7 @@ tawsb_db_arpt_dist(const egpws_pos_t *pos, airport_t *arpt,
 		}
 
 		for (int i = 0; i < 2; i++) {
-			vect3_t p = geo2ecef(GEO3_FT2M(rwy->ends[i].thr),
-			    &wgs84);
+			vect3_t p = geo2ecef_ft(rwy->ends[i].thr, &wgs84);
 			double d = vect3_abs(vect3_sub(p, my_ecef));
 			if (d < dist) {
 				dist = d;
@@ -332,8 +331,8 @@ tawsb_nearest_arpt_or_rwy(const egpws_pos_t *pos, double *arpt_dist_p,
 	free_nearest_airport_list(arpts);
 
 	if (!IS_NULL_GEO_POS(state.tawsb.ncr.liftoff_pt)) {
-		vect3_t pos_v = geo2ecef(pos->pos, &wgs84);
-		vect3_t liftoff_v = geo2ecef(state.tawsb.ncr.liftoff_pt,
+		vect3_t pos_v = geo2ecef_mtr(pos->pos, &wgs84);
+		vect3_t liftoff_v = geo2ecef_mtr(state.tawsb.ncr.liftoff_pt,
 		    &wgs84);
 		double d = vect3_abs(vect3_sub(pos_v, liftoff_v));
 
@@ -371,8 +370,8 @@ tawsb_dest_dist(const egpws_pos_t *pos, const egpws_arpt_ref_t *dest,
 	arpt = airport_lookup(&db, dest->icao, GEO3_TO_GEO2(pos->pos));
 	if (arpt == NULL) {
 		/* Use the externally-provided info */
-		*dest_dist_p = vect3_abs(vect3_sub(geo2ecef(pos->pos, &wgs84),
-		    geo2ecef(dest->pos, &wgs84)));
+		*dest_dist_p = vect3_abs(vect3_sub(geo2ecef_mtr(pos->pos,
+		    &wgs84), geo2ecef_mtr(dest->pos, &wgs84)));
 		*dest_hgt_p = pos->pos.elev - dest->pos.elev;
 		return;
 	}
@@ -528,7 +527,7 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 		geo_pos2_t gp = fpp2geo(p, &fpp);
 		double terr_elev = terr_get_elev_wide(gp, &terr_pos[i * 9]);
 		vect2_t vel;
-		vect3_t ecef = geo2ecef(GEO2_TO_GEO3(gp, pos->pos.elev),
+		vect3_t ecef = geo2ecef_mtr(GEO2_TO_GEO3(gp, pos->pos.elev),
 		    &wgs84);
 
 		ASSERT(!IS_NULL_GEO_POS(gp));
@@ -750,7 +749,7 @@ tawsb_500(const egpws_pos_t *pos)
 	double nrst_arpt_dist = 1e10;
 	double nrst_rwy_dist = 1e10;
 	geo_pos3_t nrst_rwy_pos = NULL_GEO_POS3;
-	vect3_t my_ecef = geo2ecef(pos->pos, &wgs84);
+	vect3_t my_ecef = geo2ecef_mtr(pos->pos, &wgs84);
 	double gnd_elev, ra;
 
 	for (airport_t *arpt = list_head(arpts); arpt != NULL;
@@ -764,8 +763,8 @@ tawsb_500(const egpws_pos_t *pos)
 		for (runway_t *rwy = avl_first(&arpt->rwys);
 		    rwy != NULL; rwy = AVL_NEXT(&arpt->rwys, rwy)) {
 			for (int i = 0; i < 2; i++) {
-				vect3_t thr_p = geo2ecef(
-				    GEO3_FT2M(rwy->ends[i].thr), &wgs84);
+				vect3_t thr_p =
+				    geo2ecef_ft(rwy->ends[i].thr, &wgs84);
 				double rd = vect3_abs(vect3_sub(thr_p,
 				    my_ecef));
 				if (rd < nrst_rwy_dist) {
@@ -851,8 +850,8 @@ tawsb_ncr(const egpws_pos_t *pos)
 	}
 
 	/* Validate the NCR termination conditions */
-	my_ecef = geo2ecef(pos->pos, &wgs84);
-	dep_ecef = geo2ecef(state.tawsb.ncr.liftoff_pt, &wgs84);
+	my_ecef = geo2ecef_mtr(pos->pos, &wgs84);
+	dep_ecef = geo2ecef_mtr(state.tawsb.ncr.liftoff_pt, &wgs84);
 
 	dist = vect3_abs(vect3_sub(my_ecef, dep_ecef));
 	terr_elev = terr_get_elev(GEO3_TO_GEO2(pos->pos));
@@ -944,7 +943,7 @@ add_obst_cb(obst_type_t type, geo_pos3_t pos, float agl, obst_light_t light,
     unsigned quant, void *userinfo)
 {
 	obst_t *obst;
-	vect3_t pos_ecef = geo2ecef(pos, &wgs84);
+	vect3_t pos_ecef = geo2ecef_mtr(pos, &wgs84);
 	const pos_info_t *pos_info = userinfo;
 
 	UNUSED(type);
@@ -970,7 +969,7 @@ gather_obstacles(egpws_pos_t *pos)
 	obst_t *obst;
 	int lat = floor(pos->pos.lat), lon = floor(pos->pos.lon);
 	pos_info_t pos_info = {
-	    .pos = pos->pos, .ecef = geo2ecef(pos->pos, &wgs84)
+	    .pos = pos->pos, .ecef = geo2ecef_mtr(pos->pos, &wgs84)
 	};
 
 	if (state.odb == NULL)

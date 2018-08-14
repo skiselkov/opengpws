@@ -71,6 +71,7 @@ typedef struct {
 	int		lon;		/* longitude in degrees */
 	double		min_elev;	/* minimum elevation (meters) */
 	double		max_elev;	/* maximum elevation (meters) */
+	/* protected by tile cache lock */
 	double		load_res;	/* resolution at load time */
 	bool_t		dirty;		/* pending upload to GPU */
 	GLsync		in_flight;	/* data in flight to GPU */
@@ -373,7 +374,7 @@ demd_read(const dsf_atom_t *demi, const dsf_atom_t *demd,
 
 static void
 render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
-    const dsf_atom_t *demd)
+    const dsf_atom_t *demd, double load_res)
 {
 	double tile_width = (EARTH_CIRC / 360) * cos(DEG2RAD(tile->lat));
 	unsigned dsf_width, dsf_height;
@@ -389,11 +390,11 @@ render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
 	dsf_res_y = TILE_HEIGHT / dsf_height;
 	ASSERT3F(dsf_res_x, >=, DSF_DEMI_MIN_RES);
 	ASSERT3F(dsf_res_y, >=, DSF_DEMI_MIN_RES);
-	dsf_scale_x = tile->load_res / dsf_res_x;
-	dsf_scale_y = tile->load_res / dsf_res_y;
+	dsf_scale_x = load_res / dsf_res_x;
+	dsf_scale_y = load_res / dsf_res_y;
 
-	pix_width = tile_width / tile->load_res;
-	pix_height = TILE_HEIGHT / tile->load_res;
+	pix_width = tile_width / load_res;
+	pix_height = TILE_HEIGHT / load_res;
 	ASSERT3U(pix_width, >=, 3);
 	ASSERT3U(pix_width, <=, MAX_TILE_PIXELS);
 	ASSERT3U(pix_height, >=, 3);
@@ -425,6 +426,7 @@ render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
 	tile->pix_height = pix_height;
 	free(tile->pixels);
 	tile->pixels = pixels;
+	tile->load_res = load_res;
 	if (tile->water_mask_surf != NULL) {
 		cairo_surface_destroy(tile->water_mask_surf);
 		tile->water_mask = NULL;
@@ -478,7 +480,6 @@ load_dem_tile(int lat, int lon, double load_res)
 		tile->lon = lon;
 		tile->cur_tex = -1;
 	}
-	tile->load_res = load_res;
 
 	dsf = load_dem_dsf(lat, lon, &demi, &demd);
 
@@ -486,7 +487,7 @@ load_dem_tile(int lat, int lon, double load_res)
 
 	if (dsf != NULL) {
 		ASSERT(!tile->empty);
-		render_dem_tile(tile, demi, demd);
+		render_dem_tile(tile, demi, demd, load_res);
 		ASSERT(tile->pixels != NULL);
 		/* marks the tile for GPU upload */
 		tile->dirty = B_TRUE;
@@ -555,14 +556,18 @@ select_tile_res(int tile_lat, int tile_lon, fpp_t fpp)
 }
 
 static void
-load_nrst_dem_tiles(geo_pos3_t pos)
+load_nrst_dem_tiles(void)
 {
 	int tile_width;
 	int h_tiles, v_tiles;
 	const egpws_range_t *rngs = ranges;
 	double rng = MIN_RNG;
-	fpp_t fpp = stereo_fpp_init(GEO3_TO_GEO2(pos), 0, &wgs84, B_FALSE);
 	int n_tiles = 0, bytes = 0;
+	geo_pos3_t pos;
+
+	mutex_enter(&glob_pos_lock);
+	pos = glob_pos;
+	mutex_exit(&glob_pos_lock);
 
 	for (int i = 0; !isnan(rngs[i].range); i++)
 		rng = MAX(rng, rngs[i].range);
@@ -579,6 +584,23 @@ load_nrst_dem_tiles(geo_pos3_t pos)
 			double res;
 			int tile_lat = floor(pos.lat + v);
 			int tile_lon = floor(pos.lon + h);
+			fpp_t fpp;
+
+			/*
+			 * Refresh the position to grab the tile resolution.
+			 * We need to do this because tile loading is a pretty
+			 * slow process, and if the aircraft is dragged around
+			 * the map during a single run through this function
+			 * (which can take minutes to complete), we could be
+			 * loading tiles with the wrong resolution given the
+			 * updated aircraft position.
+			 */
+			mutex_enter(&glob_pos_lock);
+			pos = glob_pos;
+			mutex_exit(&glob_pos_lock);
+
+			fpp = stereo_fpp_init(GEO3_TO_GEO2(pos), 0, &wgs84,
+			    B_FALSE);
 
 			if (!load_dem_worker_wk.run)
 				return;
@@ -706,7 +728,7 @@ load_dem_worker(void *unused)
 	mutex_exit(&dem_tile_cache_lock);
 
 	if (!IS_NULL_GEO_POS(pos))
-		load_nrst_dem_tiles(pos);
+		load_nrst_dem_tiles();
 
 	/* Unload unseen tiles */
 	mutex_enter(&dem_tile_cache_lock);
@@ -1100,6 +1122,26 @@ compute_terr_norm_vector(dem_tile_t *tile, unsigned x, unsigned y,
 	*out_norm = vect3_unit(vect3_add(norm_lat, norm_lon), NULL);
 }
 
+static double
+elev_filter_lin(dem_tile_t *tile, geo_pos2_t pos)
+{
+	double x_f = clamp((pos.lon - tile->lon) * tile->pix_width,
+	    0, tile->pix_width - 1);
+	double y_f = clamp(((pos.lat - tile->lat) * tile->pix_height),
+	    0, tile->pix_height - 1);
+	unsigned x_lo = floor(x_f), x_hi = ceil(x_f);
+	unsigned y_lo = floor(y_f), y_hi = ceil(y_f);
+	double elev1, elev2, elev3, elev4;
+
+	elev1 = ELEV_READ(tile->pixels[y_lo * tile->pix_width + x_lo]);
+	elev2 = ELEV_READ(tile->pixels[y_lo * tile->pix_width + x_hi]);
+	elev3 = ELEV_READ(tile->pixels[y_hi * tile->pix_width + x_lo]);
+	elev4 = ELEV_READ(tile->pixels[y_hi * tile->pix_width + x_hi]);
+
+	return (wavg(wavg(elev1, elev2, x_f - x_lo),
+	    wavg(elev3, elev4, x_f - x_lo), y_f - y_lo));
+}
+
 void
 terr_probe(egpws_terr_probe_t *probe)
 {
@@ -1112,10 +1154,14 @@ terr_probe(egpws_terr_probe_t *probe)
 	 * so just answer that we don't know anything yet.
 	 */
 	if (!inited) {
-		memset(probe->out_elev, 0, sizeof (*probe->out_elev) *
-		    probe->num_pts);
-		memset(probe->out_norm, 0, sizeof (*probe->out_norm) *
-		    probe->num_pts);
+		if (probe->out_elev != NULL) {
+			memset(probe->out_elev, 0, sizeof (*probe->out_elev) *
+			    probe->num_pts);
+		}
+		if (probe->out_norm != NULL) {
+			memset(probe->out_norm, 0, sizeof (*probe->out_norm) *
+			    probe->num_pts);
+		}
 		if (probe->out_water != NULL) {
 			memset(probe->out_water, 0, sizeof (*probe->out_water) *
 			    probe->num_pts);
@@ -1147,7 +1193,7 @@ terr_probe(egpws_terr_probe_t *probe)
 				probe->out_norm[i] = VECT3(0, 0, 1);
 			/*
 			 * If there is no terrain tile, then X-Plane will draw
-			 * water here. So just draw water as well.
+			 * water here. So we'll assume water as well.
 			 */
 			if (probe->out_water != NULL)
 				probe->out_water[i] = 1.0;
@@ -1157,14 +1203,20 @@ terr_probe(egpws_terr_probe_t *probe)
 		ASSERT3U(tile->pix_height, >=, 3);
 		ASSERT(tile->pixels != NULL);
 
-		x = clampi((pos.lon - tile->lon) * tile->pix_width,
+		x = clampi(round((pos.lon - tile->lon) * tile->pix_width),
 		    0, tile->pix_width - 1);
-		y = clampi((pos.lat - tile->lat) * tile->pix_height,
+		y = clampi(round((pos.lat - tile->lat) * tile->pix_height),
 		    0, tile->pix_height - 1);
 		elev = ELEV_READ(tile->pixels[y * tile->pix_width + x]);
 
-		if (probe->out_elev != NULL)
-			probe->out_elev[i] = elev;
+		if (probe->out_elev != NULL) {
+			if (!probe->filter_lin) {
+				probe->out_elev[i] = elev;
+			} else {
+				probe->out_elev[i] =
+				    elev_filter_lin(tile, pos);
+			}
+		}
 
 		if (probe->out_norm != NULL) {
 			compute_terr_norm_vector(tile, x, y, elev,

@@ -148,6 +148,7 @@ typedef struct {
 	double			*out_elev;
 	vect3_t			*out_norm;
 	double			*out_water;
+	bool_t			filter_lin;
 } egpws_terr_probe_t;
 
 typedef struct {

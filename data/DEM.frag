@@ -1,5 +1,3 @@
-#version 120
-
 /*
  * CDDL HEADER START
  *
@@ -17,6 +15,8 @@
 /*
  * Copyright 2018 Saso Kiselkov. All rights reserved.
  */
+
+#version 120
 
 uniform sampler2D	tex;
 uniform float		acf_elev_ft;

@@ -279,7 +279,7 @@ static void
 tawsb_db_arpt_dist(const egpws_pos_t *pos, airport_t *arpt,
     double *arpt_dist_p, double *arpt_hgt_p)
 {
-	vect3_t my_ecef = geo2ecef_ft(pos->pos, &wgs84);
+	vect3_t my_ecef = geo2ecef_mtr(pos->pos, &wgs84);
 	vect3_t dest_ecef = geo2ecef_ft(arpt->refpt, &wgs84);
 	double dist = vect3_abs(vect3_sub(dest_ecef, my_ecef));
 	double elev = FEET2MET(arpt->refpt.elev);

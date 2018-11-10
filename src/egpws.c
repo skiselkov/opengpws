@@ -411,8 +411,8 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 #define	RTC_WARN_STEP_FRACT	0.7
 #define	RTC_MAX_D_TRK_RATE	3			/* deg/s */
 #define	RTC_DES_THRESH		FPM2MPS(-300)
-#define	RTC_INH_DIST_THRESH	NM2MET(0.5)
-#define	RTC_INH_HGT_THRESH	FEET2MET(250)
+#define	RTC_INH_DIST_THRESH	NM2MET(0.75)
+#define	RTC_INH_HGT_THRESH	FEET2MET(350)
 #define	RTC_CAUT_INTVAL		5			/* seconds */
 #define	RTC_RISING_TERR_THRESH	FEET2MET(150)
 #define	MIN_IMPACT_PTS		5
@@ -495,8 +495,8 @@ tawsb_rtc_iti(const egpws_pos_t *pos, double d_trk)
 	}
 
 	/*
-	 * Inihibit within 0.5 NM and less than 250 ft above destination.
-	 * Spec says 200 ft, but I find it's a bit too tight.
+	 * Inihibit within 0.75 NM and less than 350 ft above destination.
+	 * Spec says 0.5NM and 200 ft, but I find it's a bit too tight.
 	 */
 	if (arpt_dist < RTC_INH_DIST_THRESH &&
 	    arpt_rel_hgt < RTC_INH_HGT_THRESH) {

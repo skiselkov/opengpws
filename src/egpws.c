@@ -997,6 +997,8 @@ main_loop(void)
 
 	ASSERT(inited);
 
+	thread_set_name("OpenGPWS");
+
 	egpws_boot();
 
 	mutex_enter(&lock);

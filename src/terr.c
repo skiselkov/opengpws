@@ -37,6 +37,7 @@
 #include <acfutils/list.h>
 #include <acfutils/math.h>
 #include <acfutils/perf.h>
+#include <acfutils/png.h>
 #include <acfutils/safe_alloc.h>
 #include <acfutils/shader.h>
 #include <acfutils/worker.h>
@@ -65,6 +66,10 @@
 #define	ELEV_V_OFF		10000			/* meters */
 #define	ELEV_READ(pixel)	((pixel) - ELEV_V_OFF)
 #define	ELEV_WRITE(elev)	((elev) + ELEV_V_OFF)
+
+/* Earth Orbit Texture constants */
+#define	EOT_ELEV_MAX		FEET2MET(29029)		/* Everest */
+#define	EOT_ELEV_MIN		FEET2MET(-1419)		/* Dead sea shore */
 
 typedef struct {
 	int		lat;		/* latitude in degrees */
@@ -236,6 +241,27 @@ load_dem_dsf(int lat, int lon, const dsf_atom_t **demi_p,
 }
 
 /*
+ * Renders a water-filled empty water mask. This is for cases where we
+ * don't have a shape file. This can happen when using Earth Orbit Textures
+ * for the height data (which cover te entire globe, but we don't have
+ * water shapefiles for ocean tiles).
+ */
+static cairo_surface_t *
+render_empty_water_mask(unsigned pix_width, unsigned pix_height)
+{
+	cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_A8,
+	    pix_width, pix_height);
+	cairo_t *cr = cairo_create(surf);
+
+	cairo_set_source_rgb(cr, 1, 1, 1);
+	cairo_paint(cr);
+	cairo_surface_flush(surf);
+	cairo_destroy(cr);
+
+	return (surf);
+}
+
+/*
  * Reads the water shape file and rasterizes it into an 8-bit water mask.
  * The pixels are the presence of water, from 0 for "no water" to 255
  * "all water". Partway values allow for gradual coloring of shorelines.
@@ -258,12 +284,16 @@ render_water_mask(int lat, int lon, int pix_width, int pix_height)
 	    dname, fname, NULL);
 
 	shp = SHPOpen(path, "rb");
-	if (shp == NULL)
+	if (shp == NULL) {
+		surf = render_empty_water_mask(pix_width, pix_height);
 		goto out;
+	}
 	SHPGetInfo(shp, &n_ent, &shp_type, NULL, NULL);
 	/* We only support polygons, given that that's what X-Plane uses. */
-	if (shp_type != SHPT_POLYGON)
+	if (shp_type != SHPT_POLYGON) {
+		surf = render_empty_water_mask(pix_width, pix_height);
 		goto out;
+	}
 
 	surf = cairo_image_surface_create(CAIRO_FORMAT_A8, pix_width,
 	    pix_height);
@@ -373,6 +403,38 @@ demd_read(const dsf_atom_t *demi, const dsf_atom_t *demd,
 }
 
 static void
+tile_set_data(dem_tile_t *tile, unsigned pix_width, unsigned pix_height,
+    double load_res, int16_t *pixels, cairo_surface_t *water_mask_surf)
+{
+	ASSERT(tile != NULL);
+	ASSERT(pixels != NULL);
+
+	mutex_enter(&dem_tile_cache_lock);
+
+	tile->pix_width = pix_width;
+	tile->pix_height = pix_height;
+	free(tile->pixels);
+	tile->pixels = pixels;
+	tile->load_res = load_res;
+
+	if (tile->water_mask_surf != NULL) {
+		cairo_surface_destroy(tile->water_mask_surf);
+		tile->water_mask = NULL;
+		tile->water_mask_stride = 0;
+		tile->water_mask_surf = NULL;
+	}
+	if (water_mask_surf != NULL) {
+		tile->water_mask_surf = water_mask_surf;
+		tile->water_mask =
+		    cairo_image_surface_get_data(water_mask_surf);
+		tile->water_mask_stride =
+		    cairo_image_surface_get_stride(water_mask_surf);
+	}
+
+	mutex_exit(&dem_tile_cache_lock);
+}
+
+static void
 render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
     const dsf_atom_t *demd, double load_res)
 {
@@ -401,7 +463,7 @@ render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
 	ASSERT3U(pix_height, <=, MAX_TILE_PIXELS);
 	pixels = safe_malloc(pix_width * pix_height * sizeof (*pixels));
 
-	dbg_log(tile, 3, "render tile %d x %d (%d x %d)",
+	dbg_log(tile, 3, "DSF render tile %d x %d (%d x %d)",
 	    tile->lat, tile->lon, pix_width, pix_height);
 
 	for (unsigned y = 0; y < pix_height; y++) {
@@ -420,28 +482,91 @@ render_dem_tile(dem_tile_t *tile, const dsf_atom_t *demi,
 	water_mask_surf = render_water_mask(tile->lat, tile->lon,
 	    pix_width, pix_height);
 
-	mutex_enter(&dem_tile_cache_lock);
+	tile_set_data(tile, pix_width, pix_height, load_res, pixels,
+	    water_mask_surf);
+}
 
-	tile->pix_width = pix_width;
-	tile->pix_height = pix_height;
-	free(tile->pixels);
-	tile->pixels = pixels;
-	tile->load_res = load_res;
-	if (tile->water_mask_surf != NULL) {
-		cairo_surface_destroy(tile->water_mask_surf);
-		tile->water_mask = NULL;
-		tile->water_mask_stride = 0;
-		tile->water_mask_surf = NULL;
-	}
-	if (water_mask_surf != NULL) {
-		tile->water_mask_surf = water_mask_surf;
-		tile->water_mask =
-		    cairo_image_surface_get_data(water_mask_surf);
-		tile->water_mask_stride =
-		    cairo_image_surface_get_stride(water_mask_surf);
+static bool_t
+load_earth_orbit_tex(dem_tile_t *tile, double load_res)
+{
+	double tile_width = (EARTH_CIRC / 360) * cos(DEG2RAD(tile->lat));
+	double scale_x, scale_y;
+	unsigned pix_width, pix_height;
+	int png_width, png_height;
+	double tile_off_lat, tile_off_lon;
+	double tile_off_x, tile_off_y;
+	int16_t *pixels;
+	cairo_surface_t *water_mask_surf = NULL;
+	uint8_t *png_pixels;
+	char *path;
+	char filename[32];
+
+	snprintf(filename, sizeof (filename), "%+03.0f%+04.0f-nrm.png",
+	    floor(tile->lat / 10.0) * 10, floor(tile->lon / 10.0) * 10);
+	path = mkpathname(get_xpdir(), "Resources", "bitmaps",
+	    "Earth Orbit Textures", filename, NULL);
+	png_pixels = png_load_from_file_rgba(path, &png_width, &png_height);
+	lacf_free(path);
+	if (png_pixels == NULL)
+		return (B_FALSE);
+	if (png_width < 1024 || png_height < 1024) {
+		lacf_free(png_pixels);
+		return (B_FALSE);
 	}
 
-	mutex_exit(&dem_tile_cache_lock);
+	pix_width = tile_width / load_res;
+	pix_height = TILE_HEIGHT / load_res;
+	pixels = safe_malloc(pix_width * pix_height * sizeof (*pixels));
+	scale_x = (png_width / 10.0) / pix_width;
+	scale_y = (png_height / 10.0) / pix_height;
+	/* PNG origin point is on the top left, not bottom left */
+	tile_off_lat = 9 - (tile->lat - (floor(tile->lat / 10.0) * 10));
+	tile_off_lon = tile->lon - (floor(tile->lon / 10.0) * 10);
+	ASSERT3F(tile_off_lat, >=, 0.0);
+	ASSERT3F(tile_off_lat, <, 10.0);
+	tile_off_x = png_width * (tile_off_lon / 10.0);
+	tile_off_y = png_height * (tile_off_lat / 10.0);
+
+	dbg_log(tile, 3, "EOT render tile %d x %d (%d x %d)",
+	    tile->lat, tile->lon, pix_width, pix_height);
+
+	for (unsigned y = 0; y < pix_height; y++) {
+		for (unsigned x = 0; x < pix_width; x++) {
+			double png_x = (x * scale_x + tile_off_x);
+			double png_y = (y * scale_y + tile_off_y);
+			int png_x_lo = clamp(floor(png_x), 0, png_width - 1);
+			int png_x_hi = clamp(ceil(png_x), 0, png_width - 1);
+			int png_y_lo = clamp(floor(png_y), 0, png_height - 1);
+			int png_y_hi = clamp(ceil(png_y), 0, png_height - 1);
+			double x_fract = png_x - png_x_lo;
+			double y_fract = png_y - png_y_lo;
+			uint8_t ul = png_pixels[sizeof (uint32_t) *
+			    (png_x_lo + png_y_lo * png_width) + 3];
+			uint8_t ur = png_pixels[sizeof (uint32_t) *
+			    (png_x_hi + png_y_lo * png_width) + 3];
+			uint8_t ll = png_pixels[sizeof (uint32_t) *
+			    (png_x_lo + png_y_hi * png_width) + 3];
+			uint8_t lr = png_pixels[sizeof (uint32_t) *
+			    (png_x_hi + png_y_hi * png_width) + 3];
+			double raw_val = wavg(wavg(ul, ur, x_fract),
+			    wavg(ll, lr, x_fract), y_fract);
+			double elev = fx_lin(raw_val, 0, EOT_ELEV_MAX,
+			    255, EOT_ELEV_MIN);
+
+			pixels[x + (pix_height - y - 1) * pix_width] =
+			    ELEV_WRITE(elev);
+		}
+	}
+
+	water_mask_surf = render_water_mask(tile->lat, tile->lon,
+	    pix_width, pix_height);
+
+	tile_set_data(tile, pix_width, pix_height, load_res, pixels,
+	    water_mask_surf);
+
+	lacf_free(png_pixels);
+
+	return (B_TRUE);
 }
 
 static int
@@ -488,6 +613,11 @@ load_dem_tile(int lat, int lon, double load_res)
 	if (dsf != NULL) {
 		ASSERT(!tile->empty);
 		render_dem_tile(tile, demi, demd, load_res);
+		ASSERT(tile->pixels != NULL);
+		/* marks the tile for GPU upload */
+		tile->dirty = B_TRUE;
+	} else if (load_earth_orbit_tex(tile, load_res)) {
+		ASSERT(!tile->empty);
 		ASSERT(tile->pixels != NULL);
 		/* marks the tile for GPU upload */
 		tile->dirty = B_TRUE;

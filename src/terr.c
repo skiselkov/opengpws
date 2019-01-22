@@ -274,14 +274,19 @@ render_water_mask(int lat, int lon, int pix_width, int pix_height)
 	char *path;
 	cairo_surface_t *surf = NULL;
 	cairo_t *cr;
-	SHPHandle shp;
+	SHPHandle shp = NULL;
 	int n_ent, shp_type;
+	bool_t isdir;
 
 	snprintf(dname, sizeof (dname), "%+03.0f%+04.0f",
 	    floor(lat / 10.0) * 10.0, floor(lon / 10.0) * 10.0);
 	snprintf(fname, sizeof (fname), "%+03d%+04d.shp", lat, lon);
 	path = mkpathname(get_xpdir(), "Resources", "map data", "water",
 	    dname, fname, NULL);
+	if (!file_exists(path, &isdir) || isdir) {
+		surf = render_empty_water_mask(pix_width, pix_height);
+		goto out;
+	}
 
 	shp = SHPOpen(path, "rb");
 	if (shp == NULL) {

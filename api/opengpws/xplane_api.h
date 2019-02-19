@@ -19,9 +19,8 @@
 #ifndef	_OPENGPWS_XPLANE_API_H_
 #define	_OPENGPWS_XPLANE_API_H_
 
-#include <GL/glew.h>
-
 #include <acfutils/avl.h>
+#include <acfutils/glew.h>
 #include <acfutils/geom.h>
 #include <acfutils/odb.h>
 #include <acfutils/thread.h>

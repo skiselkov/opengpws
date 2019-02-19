@@ -22,8 +22,6 @@
 #include <stdlib.h>
 #include <math.h>
 
-#include <GL/glew.h>
-#include <cglm/cglm.h>
 #include <shapefil.h>
 #include <cairo.h>
 
@@ -32,6 +30,7 @@
 #include <acfutils/assert.h>
 #include <acfutils/avl.h>
 #include <acfutils/dsf.h>
+#include <acfutils/glew.h>
 #include <acfutils/glutils.h>
 #include <acfutils/helpers.h>
 #include <acfutils/list.h>
@@ -43,6 +42,8 @@
 #include <acfutils/worker.h>
 #include <acfutils/thread.h>
 #include <acfutils/time.h>
+
+#include <cglm/cglm.h>
 
 #include "dbg_log.h"
 #include "egpws.h"

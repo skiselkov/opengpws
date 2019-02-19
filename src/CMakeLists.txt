@@ -43,7 +43,9 @@ else()
 endif()
 
 include_directories(opengpws PUBLIC
-    "${LIBACFUTILS}/src" "${LIBACFUTILS}/glew" "..")
+    "${LIBACFUTILS}/src"
+    "${LIBACFUTILS}/glew/glew-1.13.0-linux-64/install/include"
+    "..")
 
 #compiler flags
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Werror --std=c99 \

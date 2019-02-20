@@ -195,6 +195,7 @@ else()
 	    ${PIXMAN_LIBRARY}
 	    ${FREETYPE_LIBRARY}
 	    ${LIBPNG_LIBRARY}
+	    "${LIBACFUTILS}/glew/glew-1.13.0-linux-64/install/lib64/libGLEWmx.a"
 	    ${ZLIB_LIBRARY}
 	    ${SHP_LIBRARY}
 	    ${PROJ_LIBRARY}

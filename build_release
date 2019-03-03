@@ -10,6 +10,14 @@ Darwin)
 	;;
 esac
 
+while getopts "G" o; do
+	case "${o}" in
+	G)
+		GARMIN=1
+		;;
+	esac
+done
+
 set -e
 
 rm -rf "$OUTPUT_DIR" "$OUTPUT_DIR.zip"
@@ -29,16 +37,31 @@ else
 	    "$OUTPUT_DIR/mac_x64/${OUTPUT_DIR}.xpl"
 fi
 
-find data -iname '*.flac' | while read; do
+find data -iname '*.flac' | fgrep -v '/src/' | while read; do
 	if ! [ -f "${REPLY/%.flac/.opus}" ]; then
 		opusenc --bitrate 32 "${REPLY}" "${REPLY/%.flac/.opus}"
 	fi
 done
 
-find data -iname '*.opus' -or -iname '*.vert' -or -iname '*.frag' | \
-    while read; do
-	$INSTALL -- "$REPLY" "$OUTPUT_DIR/$REPLY"
-done
+if [ -z "$GARMIN" ]; then
+	find data -iname '*.opus' -or -iname '*.vert' -or -iname '*.frag' | \
+	    while read; do
+		$INSTALL -- "$REPLY" "$OUTPUT_DIR/$REPLY"
+	done
+else
+	find data -iname '*.vert' -or -iname '*.frag' | while read; do
+		$INSTALL -- "$REPLY" "$OUTPUT_DIR/$REPLY"
+	done
+	for FILE in data/*.opus; do
+		$INSTALL -- "$FILE" "$OUTPUT_DIR/$FILE"
+	done
+	find data/ra -iname '*.opus' | while read; do
+		$INSTALL -- "$REPLY" "$OUTPUT_DIR/$REPLY"
+	done
+	find data/garmin -iname '*.opus' | while read; do
+		$INSTALL -- "$REPLY" "$OUTPUT_DIR/data"
+	done
+fi
 
 $INSTALL -- "api/opengpws/xplane_api.h" "$OUTPUT_DIR/opengpws/xplane_api.h"
 

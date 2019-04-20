@@ -30,6 +30,7 @@
 #include <acfutils/core.h>
 #include <acfutils/crc64.h>
 #include <acfutils/dr.h>
+#include <acfutils/glew.h>
 #include <acfutils/helpers.h>
 #include <acfutils/log.h>
 #include <acfutils/perf.h>
@@ -397,3 +398,14 @@ const char *get_plugindir(void)
 {
 	return (plugindir);
 }
+
+#if	IBM
+BOOL WINAPI
+DllMain(HINSTANCE hinst, DWORD reason, LPVOID resvd)
+{
+	UNUSED(hinst);
+	UNUSED(resvd);
+	lacf_glew_dllmain_hook(reason);
+	return (TRUE);
+}
+#endif	/* IBM */

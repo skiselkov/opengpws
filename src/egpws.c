@@ -972,6 +972,8 @@ gather_obstacles(egpws_pos_t *pos)
 	    .pos = pos->pos, .ecef = geo2ecef_mtr(pos->pos, &wgs84)
 	};
 
+	ASSERT_MUTEX_HELD(&state.adv_lock);
+
 	if (state.odb == NULL)
 		return;
 

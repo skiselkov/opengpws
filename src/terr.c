@@ -1081,7 +1081,7 @@ update_tiles(void)
 			continue;
 		if (tile->tex[next_tex] == 0) {
 			glGenTextures(1, &tile->tex[next_tex]);
-			XPLMBindTexture2d(tile->tex[next_tex], GL_TEXTURE_2D);
+			glBindTexture(GL_TEXTURE_2D, tile->tex[next_tex]);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
 			    GL_NEAREST);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
@@ -1115,7 +1115,7 @@ update_tiles(void)
 			    glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 		} else if (glClientWaitSync(tile->in_flight, 0, 0) !=
 		    GL_TIMEOUT_EXPIRED) {
-			XPLMBindTexture2d(tile->tex[next_tex], GL_TEXTURE_2D);
+			glBindTexture(GL_TEXTURE_2D, tile->tex[next_tex]);
 			glTexImage2D(GL_TEXTURE_2D, 0, GL_RG, tile->pix_width,
 			    tile->pix_height, 0, GL_RG, GL_UNSIGNED_BYTE, NULL);
 
@@ -1200,11 +1200,17 @@ void
 terr_render(const egpws_render_t *render)
 {
 	ASSERT(inited);
+#ifdef	FAST_DEBUG
+	glutils_reset_errors();
+#endif
 
 	update_tiles();
 
 	if (render->do_draw)
 		draw_tiles(render);
+#ifdef	FAST_DEBUG
+	VERIFY3U(glGetError(), ==, GL_NO_ERROR);
+#endif
 }
 
 static void

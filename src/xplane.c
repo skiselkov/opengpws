@@ -267,17 +267,22 @@ XPluginStart(char *name, char *sig, char *desc)
 	conf_free(conf);
 	free(confpath);
 
+	logMsg("OpenGPWS start succeded");
+
 	return (1);
 }
 
 PLUGIN_API void
 XPluginStop(void)
 {
+	logMsg("OpenGPWS stopped");
 }
 
 PLUGIN_API int
 XPluginEnable(void)
 {
+	logMsg("OpenGPWS enabling");
+
 	if (!snd_sys_init())
 		return (0);
 
@@ -319,6 +324,8 @@ XPluginEnable(void)
 	XPLMRegisterFlightLoopCallback(sensor_cb, SENSOR_INTVAL, NULL);
 	XPLMRegisterDrawCallback(sound_cb, xplm_Phase_FirstScene, 1, NULL);
 
+	logMsg("OpenGPWS successful");
+
 	return (1);
 }
 
@@ -328,9 +335,11 @@ XPluginDisable(void)
 	XPLMUnregisterFlightLoopCallback(sensor_cb, NULL);
 	XPLMUnregisterDrawCallback(sound_cb, xplm_Phase_FirstScene, 1, NULL);
 
+	logMsg("OpenGPWS disabling");
 	egpws_fini();
 	terr_fini();
 	snd_sys_fini();
+	logMsg("OpenGPWS disable complete");
 }
 
 static void

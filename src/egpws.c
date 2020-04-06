@@ -13,7 +13,7 @@
  * CDDL HEADER END
 */
 /*
- * Copyright 2017 Saso Kiselkov. All rights reserved.
+ * Copyright 2020 Saso Kiselkov. All rights reserved.
  */
 
 #include <string.h>
@@ -1123,7 +1123,17 @@ egpws_set_position(egpws_pos_t pos, double now)
 	mutex_enter(&glob_data.lock);
 
 	d_t = now - glob_data.last_pos_update;
-	ASSERT3F(d_t, >, 0);
+	if (d_t < 0) {
+		/*
+		 * If the real time clock jumps backwards, eat the new
+		 * time and wait for another position update.
+		 */
+		logMsg("Time skew detected, real time clock jumped back "
+		    "%f seconds", ABS(d_t));
+		glob_data.last_pos_update = now;
+		mutex_exit(&glob_data.lock);
+		return;
+	}
 	if (!isnan(glob_data.pos.trk) && !isnan(pos.trk)) {
 		double rel_trk = rel_hdg(glob_data.pos.trk, pos.trk) / d_t;
 		FILTER_IN(glob_data.d_trk, rel_trk, d_t, D_TRK_UPD_RATE);

@@ -108,16 +108,17 @@ static egpws_intf_t intf = {
 	.set_odb = egpws_set_odb
 };
 
-static int
-sound_cb(XPLMDrawingPhase phase, int before, void *refcon)
+static float
+sound_cb(float elapsed, float elapsed2, int counter, void *refcon)
 {
-	UNUSED(phase);
-	UNUSED(before);
+	UNUSED(elapsed);
+	UNUSED(elapsed2);
+	UNUSED(counter);
 	UNUSED(refcon);
 
 	snd_sys_floop_cb();
 
-	return (1);
+	return (-1);
 }
 
 static float
@@ -322,7 +323,7 @@ XPluginEnable(void)
 	terr_init();
 
 	XPLMRegisterFlightLoopCallback(sensor_cb, SENSOR_INTVAL, NULL);
-	XPLMRegisterDrawCallback(sound_cb, xplm_Phase_FirstScene, 1, NULL);
+	XPLMRegisterFlightLoopCallback(sound_cb, -1, NULL);
 
 	logMsg("OpenGPWS successful");
 
@@ -333,7 +334,7 @@ PLUGIN_API void
 XPluginDisable(void)
 {
 	XPLMUnregisterFlightLoopCallback(sensor_cb, NULL);
-	XPLMUnregisterDrawCallback(sound_cb, xplm_Phase_FirstScene, 1, NULL);
+	XPLMUnregisterFlightLoopCallback(sound_cb, NULL);
 
 	logMsg("OpenGPWS disabling");
 	egpws_fini();

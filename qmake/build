@@ -13,7 +13,7 @@
 #
 # CDDL HEADER END
 
-# Copyright 2018 Saso Kiselkov. All rights reserved.
+# Copyright 2020 Saso Kiselkov. All rights reserved.
 
 # Locate libacfutils and build it if necessary
 LIBACFUTILS="$(qmake -query LIBACFUTILS)"
@@ -31,7 +31,7 @@ if [[ "$HOST_OS" = "Darwin" ]]; then
 	    make -j $NCPUS &&
 	    mv libmac.xpl.dylib "$output_dir/mac_x64/OpenGPWS.xpl"
 	if [ $? != 0 ] ; then
-		exit
+		exit 1
 	fi
 else
 	make distclean > /dev/null
@@ -43,7 +43,7 @@ else
 	    "$LIBACFUTILS/tools/mksyms" "$output_dir/win_x64/OpenGPWS.xpl" > \
 	    "$output_dir/win_x64/syms.txt"
 	if [ $? != 0 ] ; then
-		exit
+		exit 1
 	fi
 
 	make distclean > /dev/null
@@ -52,7 +52,7 @@ else
 	    make -j $NCPUS && \
 	    mv liblin.xpl.so "$output_dir/lin_x64/OpenGPWS.xpl"
 	if [ $? != 0 ] ; then
-		exit
+		exit 1
 	fi
 fi
 

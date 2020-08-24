@@ -18,6 +18,12 @@ while getopts "G" o; do
 	esac
 done
 
+if ! opusenc -h &> /dev/null ; then
+	echo "Couldn't find \"opusenc\" command. Please install \"opus-tools\"" \
+	    >&2
+	exit 1
+fi
+
 set -e
 
 rm -rf "$OUTPUT_DIR" "$OUTPUT_DIR.zip"

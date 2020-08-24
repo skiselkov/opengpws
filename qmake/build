@@ -22,6 +22,12 @@ HOST_OS="$(uname)"
 release_dir="debug"
 output_dir="output"
 
+if [ "$LIBACFUTILS" = "**Unknown**" ]; then
+	echo "Please use \"qmake -set LIBACFUTILS <<path>>\" to " \
+	    "point to where you have libacfutils unpacked." >&2
+	exit 1
+fi
+
 rm -rf "$release_dir" "$output_dir"
 mkdir -p "$release_dir" "$output_dir"/{win,mac,lin}_x64
 

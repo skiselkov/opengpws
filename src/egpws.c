@@ -993,11 +993,12 @@ gather_obstacles(egpws_pos_t *pos)
 }
 
 static void
-main_loop(void)
+main_loop(void *unused)
 {
 	uint64_t now = microclock();
 
 	ASSERT(inited);
+	UNUSED(unused);
 
 	thread_set_name("OpenGPWS");
 
@@ -1078,7 +1079,7 @@ egpws_init(const egpws_conf_t *acf_conf)
 	dbg_log(egpws, 3, "EGPWS type: %s",
 	    conf.type == EGPWS_MK_VIII ? "MK VIII" : "TAWS-B");
 
-	VERIFY(thread_create(&worker, (int(*)(void *))main_loop, NULL));
+	VERIFY(thread_create(&worker, main_loop, NULL));
 
 	dbg_log(egpws, 1, "init");
 }

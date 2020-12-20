@@ -124,6 +124,8 @@ snd_sys_init(void)
 
 	mutex_init(&lock);
 	alc = openal_init(NULL, B_FALSE);
+	if (alc == NULL)
+		goto errout;
 	sound_inh = B_FALSE;
 
 	for (snd_id_t snd = 0; snd < NUM_SOUNDS; snd++) {
@@ -133,10 +135,8 @@ snd_sys_init(void)
 		sounds[snd].wav = wav_load(filename, sounds[snd].filename, alc);
 		free(filename);
 
-		if (sounds[snd].wav == NULL) {
-			snd_sys_fini();
-			return (B_FALSE);
-		}
+		if (sounds[snd].wav == NULL)
+			goto errout;
 		sounds[snd].gain = -1;
 	}
 
@@ -147,6 +147,9 @@ snd_sys_init(void)
 	fdr_find(&drs.paused, "sim/time/paused");
 
 	return (B_TRUE);
+errout:
+	snd_sys_fini();
+	return (B_FALSE);
 }
 
 void
@@ -161,8 +164,10 @@ snd_sys_fini(void)
 			sounds[snd].wav = NULL;
 		}
 	}
-
-	openal_fini(alc);
+	if (alc != NULL) {
+		openal_fini(alc);
+		alc = NULL;
+	}
 	mutex_destroy(&lock);
 
 	inited = B_FALSE;

@@ -3,7 +3,7 @@
 OUTPUT_DIR="OpenGPWS"
 case $(uname) in
 Darwin)
-	INSTALL="ginstall -D -m 644"
+	INSTALL="install -m 644"
 	;;
 *)
 	INSTALL="install -D -m 644"
@@ -39,6 +39,14 @@ if [[ $(uname) = "Linux" ]]; then
 	$INSTALL -- "qmake/output/win_x64/syms.txt" \
 	    "$OUTPUT_DIR/win_x64/syms.txt"
 else
+	# MacOS "install" is such a pile of trash that it can't create
+	# directories automatically while copying files, so we need to
+	# hold its hand and do it manually.
+	mkdir -p "$OUTPUT_DIR/mac_x64" \
+	    "$OUTPUT_DIR/data/garmin" \
+	    "$OUTPUT_DIR/data/ra/garmin" \
+	    "$OUTPUT_DIR/data/ra/boeing" \
+	    "$OUTPUT_DIR/opengpws"
 	$INSTALL -- "qmake/output/mac_x64/${OUTPUT_DIR}.xpl" \
 	    "$OUTPUT_DIR/mac_x64/${OUTPUT_DIR}.xpl"
 fi

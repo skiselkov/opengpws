@@ -59,6 +59,8 @@ DEFINES += PLUGIN_VERSION=\'\"$$system("git rev-parse --short HEAD")\"\'
 }
 
 QMAKE_CFLAGS += -Wno-missing-field-initializers
+QMAKE_CFLAGS_WARN_ON -= -W -Wall -Wextra
+QMAKE_CXXFLAGS_WARN_ON -= -W -Wall -Wextra
 
 win32 {
 	CONFIG += dll

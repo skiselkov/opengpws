@@ -86,7 +86,7 @@ static struct {
 	bool_t	on;
 } nav1, nav2;
 
-static egpws_intf_t intf = {
+static egpws_intf_t egpws_intf = {
 	.set_state = set_state,
 	.set_flaps_ovrd = egpws_set_flaps_ovrd,
 	.set_pos_ok = set_pos_ok,
@@ -392,7 +392,7 @@ XPluginReceiveMessage(XPLMPluginID from, int msg, void *param)
 	switch (msg) {
 	case EGPWS_GET_INTF: {
 		egpws_intf_t **intf_p = param;
-		*intf_p = &intf;
+		*intf_p = &egpws_intf;
 		break;
 	}
 	}

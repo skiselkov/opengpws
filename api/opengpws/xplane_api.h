@@ -132,6 +132,7 @@ enum { EGPWS_MAX_NUM_IMP_PTS = 32 };
 typedef struct {
 	int		num_points;
 	geo_pos3_t	points[EGPWS_MAX_NUM_IMP_PTS];
+	bool_t		is_warn[EGPWS_MAX_NUM_IMP_PTS];
 } egpws_impact_t;
 
 enum { EGPWS_MAX_NUM_OBST_IMP_PTS = 128 };
@@ -143,7 +144,7 @@ typedef struct {
 
 typedef struct {
 	unsigned		num_pts;
-	geo_pos2_t		*in_pts;
+	const geo_pos2_t	*in_pts;
 	double			*out_elev;
 	vect3_t			*out_norm;
 	double			*out_water;

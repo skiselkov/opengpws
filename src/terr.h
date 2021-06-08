@@ -37,6 +37,7 @@ void terr_probe(egpws_terr_probe_t *probe);
 bool_t terr_have_data(geo_pos2_t pos, double *tile_load_res);
 
 void terr_render(const egpws_render_t *render);
+fpp_t terr_render_get_fpp(const egpws_render_t *render);
 
 void terr_reload_gl_progs(void);
 

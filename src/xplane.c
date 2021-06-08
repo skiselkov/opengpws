@@ -96,6 +96,7 @@ static egpws_intf_t egpws_intf = {
 	.set_nav_on = set_nav_on,
 	.set_ranges = terr_set_ranges,
 	.terr_render = terr_render,
+	.terr_render_get_fpp = terr_render_get_fpp,
 	.get_advisory = egpws_get_advisory,
 	.set_sound_inh = snd_sys_set_inh,
 	.set_sound_supp = snd_sys_set_supp,

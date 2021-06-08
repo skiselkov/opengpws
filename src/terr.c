@@ -1133,13 +1133,15 @@ update_tiles(void)
 static void
 draw_tiles(const egpws_render_t *render)
 {
-	fpp_t fpp = ortho_fpp_init(GEO3_TO_GEO2(render->position),
-	    render->rotation, &wgs84, B_FALSE);
+	fpp_t fpp;
 	const egpws_conf_t *conf = egpws_get_conf();
 	mat4 pvm;
 	GLfloat hgt_rngs_ft[4 * 2];
 	GLfloat hgt_colors[4 * 4];
 	GLuint prog;
+
+	ASSERT(render != NULL);
+	fpp = terr_render_get_fpp(render);
 
 	glm_ortho(0, render->disp_sz.x, 0, render->disp_sz.y, 0, 1, pvm);
 	glm_translate(pvm, (vec3){render->offset.x, render->offset.y, 0});
@@ -1184,9 +1186,6 @@ draw_tiles(const egpws_render_t *render)
 		v[2] = geo2fpp(GEO_POS2(tile->lat + 1, tile->lon + 1), &fpp);
 		v[3] = geo2fpp(GEO_POS2(tile->lat, tile->lon + 1), &fpp);
 
-		for (int i = 0; i < 4; i++)
-			v[i] = vect2_scmul(v[i], render->scale);
-
 		glBindTexture(GL_TEXTURE_2D, tile->tex[tile->cur_tex]);
 
 		glutils_init_2D_quads(&quads, v, t, 4);
@@ -1213,6 +1212,22 @@ terr_render(const egpws_render_t *render)
 #ifdef	FAST_DEBUG
 	VERIFY3U(glGetError(), ==, GL_NO_ERROR);
 #endif
+}
+
+fpp_t
+terr_render_get_fpp(const egpws_render_t *render)
+{
+	fpp_t fpp;
+
+	ASSERT(render != NULL);
+	ASSERT(!IS_NULL_GEO_POS2(render->position));
+	ASSERT(isfinite(render->rotation));
+
+	fpp = ortho_fpp_init(TO_GEO2(render->position), render->rotation,
+	    NULL, true);
+	fpp_set_scale(&fpp, VECT2(render->scale, render->scale));
+
+	return (fpp);
 }
 
 static void

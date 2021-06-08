@@ -1139,6 +1139,7 @@ draw_tiles(const egpws_render_t *render)
 	mat4 pvm;
 	GLfloat hgt_rngs_ft[4 * 2];
 	GLfloat hgt_colors[4 * 4];
+	GLuint prog;
 
 	glm_ortho(0, render->disp_sz.x, 0, render->disp_sz.y, 0, 1, pvm);
 	glm_translate(pvm, (vec3){render->offset.x, render->offset.y, 0});
@@ -1153,16 +1154,17 @@ draw_tiles(const egpws_render_t *render)
 
 	glActiveTexture(GL_TEXTURE0);
 
-	glUseProgram(DEM_prog);
+	prog = (render->prog != 0 ? render->prog : DEM_prog);
+	glUseProgram(prog);
 
-	glUniformMatrix4fv(glGetUniformLocation(DEM_prog, "pvm"),
+	glUniformMatrix4fv(glGetUniformLocation(prog, "pvm"),
 	    1, GL_FALSE, (GLfloat *)pvm);
-	glUniform1i(glGetUniformLocation(DEM_prog, "tex"), 0);
-	glUniform1f(glGetUniformLocation(DEM_prog, "acf_elev_ft"),
+	glUniform1i(glGetUniformLocation(prog, "tex"), 0);
+	glUniform1f(glGetUniformLocation(prog, "acf_elev_ft"),
 	    MET2FEET(glob_pos.elev));
-	glUniform2fv(glGetUniformLocation(DEM_prog, "hgt_rngs_ft"),
+	glUniform2fv(glGetUniformLocation(prog, "hgt_rngs_ft"),
 	    4 * 2, hgt_rngs_ft);
-	glUniform4fv(glGetUniformLocation(DEM_prog, "hgt_colors"),
+	glUniform4fv(glGetUniformLocation(prog, "hgt_colors"),
 	    4 * 4, hgt_colors);
 
 	mutex_enter(&dem_tile_cache_lock);
@@ -1188,7 +1190,7 @@ draw_tiles(const egpws_render_t *render)
 		glBindTexture(GL_TEXTURE_2D, tile->tex[tile->cur_tex]);
 
 		glutils_init_2D_quads(&quads, v, t, 4);
-		glutils_draw_quads(&quads, DEM_prog);
+		glutils_draw_quads(&quads, prog);
 		glutils_destroy_quads(&quads);
 	}
 	mutex_exit(&dem_tile_cache_lock);

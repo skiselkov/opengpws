@@ -116,6 +116,7 @@ typedef struct {
 	double		scale;
 	vect2_t		offset;
 	vect2_t		disp_sz;	/* pixel-size of target */
+	GLuint		prog;		/* optional, pass 0 for default */
 } egpws_render_t;
 
 typedef enum {

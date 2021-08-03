@@ -161,7 +161,6 @@ typedef struct {
 	void (*set_nav_on)(bool_t nav1_on, bool_t nav2_on);
 	void (*set_ranges)(const egpws_range_t *ranges);
 	void (*terr_render)(const egpws_render_t *render);
-	fpp_t (*terr_render_get_fpp)(const egpws_render_t *render);
 	egpws_advisory_t (*get_advisory)(void);
 	void (*set_sound_inh)(bool_t flag);
 	void (*set_sound_supp)(bool_t flag);
@@ -173,6 +172,7 @@ typedef struct {
 	void (*reload_gl_progs)(void);
 	bool_t (*is_inited)(void);
 	void (*set_odb)(odb_t *odb);
+	fpp_t (*terr_render_get_fpp)(const egpws_render_t *render);
 } egpws_intf_t;
 
 enum {

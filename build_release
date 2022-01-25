@@ -1,4 +1,19 @@
 #!/bin/bash
+#
+# CDDL HEADER START
+#
+# This file and its contents are supplied under the terms of the
+# # Common Development and Distribution License ("CDDL"), version 1.0.
+# You may only use this file in accordance with the terms of version
+# 1.0 of the CDDL.
+#
+# A full copy of the text of the CDDL should have accompanied this
+# source.  A copy of the CDDL is also available via the Internet at
+# http://www.illumos.org/license/CDDL.
+#
+# CDDL HEADER END
+#
+# Copyright 2022 Saso Kiselkov. All rights reserved.
 
 OUTPUT_DIR="OpenGPWS"
 case $(uname) in
@@ -10,8 +25,12 @@ Darwin)
 	;;
 esac
 
-while getopts "G" o; do
+while getopts "AG" o; do
 	case "${o}" in
+	A)
+		NOAUDIO=1
+		NOAUDIO_FLAG="-A"
+		;;
 	G)
 		GARMIN=1
 		;;
@@ -29,7 +48,7 @@ set -e
 rm -rf "$OUTPUT_DIR" "$OUTPUT_DIR.zip"
 mkdir -p "$OUTPUT_DIR"
 
-( cd qmake && ./build ) || exit 1
+( cd qmake && ./build $NOAUDIO_FLAG ) || exit 1
 
 if [[ $(uname) = "Linux" ]]; then
 	$INSTALL -- "qmake/output/lin_x64/${OUTPUT_DIR}.xpl" \
@@ -51,11 +70,13 @@ else
 	    "$OUTPUT_DIR/mac_x64/${OUTPUT_DIR}.xpl"
 fi
 
-find data -iname '*.flac' | fgrep -v '/src/' | while read; do
-	if ! [ -f "${REPLY/%.flac/.opus}" ]; then
-		opusenc --bitrate 32 "${REPLY}" "${REPLY/%.flac/.opus}"
-	fi
-done
+if [[ "$NOAUDIO" != 1 ]]; then
+	find data -iname '*.flac' | fgrep -v '/src/' | while read; do
+		if ! [ -f "${REPLY/%.flac/.opus}" ]; then
+			opusenc --bitrate 32 "${REPLY}" "${REPLY/%.flac/.opus}"
+		fi
+	done
+fi
 
 if [ -z "$GARMIN" ]; then
 	find data -iname '*.opus' -or -iname '*.vert' -or -iname '*.frag' | \
@@ -66,15 +87,17 @@ else
 	find data -iname '*.vert' -or -iname '*.frag' | while read; do
 		$INSTALL -- "$REPLY" "$OUTPUT_DIR/$REPLY"
 	done
-	for FILE in data/*.opus; do
-		$INSTALL -- "$FILE" "$OUTPUT_DIR/$FILE"
-	done
-	find data/ra -iname '*.opus' | while read; do
-		$INSTALL -- "$REPLY" "$OUTPUT_DIR/$REPLY"
-	done
-	find data/garmin -iname '*.opus' | while read; do
-		$INSTALL -- "$REPLY" "$OUTPUT_DIR/data"
-	done
+	if [[ "$NOAUDIO" != 1 ]]; then
+		for FILE in data/*.opus; do
+			$INSTALL -- "$FILE" "$OUTPUT_DIR/$FILE"
+		done
+		find data/ra -iname '*.opus' | while read; do
+			$INSTALL -- "$REPLY" "$OUTPUT_DIR/$REPLY"
+		done
+		find data/garmin -iname '*.opus' | while read; do
+			$INSTALL -- "$REPLY" "$OUTPUT_DIR/data"
+		done
+	fi
 fi
 
 $INSTALL -- "api/opengpws/xplane_api.h" "$OUTPUT_DIR/opengpws/xplane_api.h"

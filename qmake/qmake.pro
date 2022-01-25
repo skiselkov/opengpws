@@ -27,6 +27,7 @@ INCLUDEPATH += $$[LIBACFUTILS]/SDK/CHeaders/Widgets
 INCLUDEPATH += $$[LIBACFUTILS]/src
 INCLUDEPATH += $$[LIBACFUTILS]/acf_apis
 INCLUDEPATH += $$[LIBACFUTILS]/glew
+AUDIO = $$[OPENGPWS_AUDIO]
 
 # Needed for opengpws/xplane_api.h
 INCLUDEPATH += ../api
@@ -61,6 +62,10 @@ DEFINES += PLUGIN_VERSION=\'\"$$system("git rev-parse --short HEAD")\"\'
 QMAKE_CFLAGS += -Wno-missing-field-initializers
 QMAKE_CFLAGS_WARN_ON -= -W -Wall -Wextra
 QMAKE_CXXFLAGS_WARN_ON -= -W -Wall -Wextra
+
+contains(AUDIO, 0) {
+	DEFINES += NOAUDIO
+}
 
 win32 {
 	CONFIG += dll

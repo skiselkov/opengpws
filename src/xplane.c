@@ -13,7 +13,7 @@
  * CDDL HEADER END
  */
 /*
- * Copyright 2017 Saso Kiselkov. All rights reserved.
+ * Copyright 2022 Saso Kiselkov. All rights reserved.
  */
 
 #include <errno.h>
@@ -109,6 +109,7 @@ static egpws_intf_t egpws_intf = {
 	.set_odb = egpws_set_odb
 };
 
+#ifndef	NOAUDIO
 static float
 sound_cb(float elapsed, float elapsed2, int counter, void *refcon)
 {
@@ -121,6 +122,7 @@ sound_cb(float elapsed, float elapsed2, int counter, void *refcon)
 
 	return (-1);
 }
+#endif	/* !defined(NOAUDIO) */
 
 static float
 sensor_cb(float elapsed, float elapsed2, int counter, void *refcon)
@@ -287,7 +289,6 @@ XPluginEnable(void)
 
 	if (!snd_sys_init())
 		return (0);
-
 	fdr_find(&lat, "sim/flightmodel/position/latitude");
 	fdr_find(&lon, "sim/flightmodel/position/longitude");
 	fdr_find(&elev, "sim/flightmodel/position/elevation");
@@ -324,7 +325,9 @@ XPluginEnable(void)
 	terr_init();
 
 	XPLMRegisterFlightLoopCallback(sensor_cb, SENSOR_INTVAL, NULL);
+#ifndef	NOAUDIO
 	XPLMRegisterFlightLoopCallback(sound_cb, -1, NULL);
+#endif
 
 	logMsg("OpenGPWS successful");
 
@@ -335,8 +338,9 @@ PLUGIN_API void
 XPluginDisable(void)
 {
 	XPLMUnregisterFlightLoopCallback(sensor_cb, NULL);
+#ifndef	NOAUDIO
 	XPLMUnregisterFlightLoopCallback(sound_cb, NULL);
-
+#endif
 	logMsg("OpenGPWS disabling");
 	egpws_fini();
 	terr_fini();

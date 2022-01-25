@@ -13,7 +13,7 @@
  * CDDL HEADER END
 */
 /*
- * Copyright 2017 Saso Kiselkov. All rights reserved.
+ * Copyright 2022 Saso Kiselkov. All rights reserved.
  */
 
 #ifndef	_SND_SYS_H_
@@ -60,6 +60,8 @@ typedef enum {
 	NUM_SOUNDS
 } snd_id_t;
 
+#ifndef	NOAUDIO
+
 bool_t snd_sys_init(void);
 void snd_sys_fini(void);
 void snd_sys_floop_cb(void);
@@ -67,6 +69,37 @@ void sched_sound(snd_id_t snd);
 void unsched_sound(snd_id_t snd);
 void snd_sys_set_inh(bool_t flag);
 void snd_sys_set_supp(bool_t flag);
+
+#else	/* defined(NOAUDIO) */
+
+#define	snd_sys_init()	B_TRUE
+#define	snd_sys_fini()
+
+static inline void
+sched_sound(snd_id_t snd)
+{
+	UNUSED(snd);
+}
+
+static inline void
+unsched_sound(snd_id_t snd)
+{
+	UNUSED(snd);
+}
+
+static inline void
+snd_sys_set_inh(bool_t flag)
+{
+	UNUSED(flag);
+}
+
+static inline void
+snd_sys_set_supp(bool_t flag)
+{
+	UNUSED(flag);
+}
+
+#endif	/* defined(NOAUDIO) */
 
 #ifdef __cplusplus
 }

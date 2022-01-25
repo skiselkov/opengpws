@@ -13,7 +13,7 @@
 #
 # CDDL HEADER END
 
-# Copyright 2020 Saso Kiselkov. All rights reserved.
+# Copyright 2022 Saso Kiselkov. All rights reserved.
 
 # Locate libacfutils and build it if necessary
 LIBACFUTILS="$(qmake -query LIBACFUTILS)"
@@ -21,6 +21,15 @@ HOST_OS="$(uname)"
 
 release_dir="debug"
 output_dir="output"
+
+qmake -set OPENGPWS_AUDIO 1
+while getopts "AG" o; do
+	case "${o}" in
+	A)
+		qmake -set OPENGPWS_AUDIO 0
+		;;
+	esac
+done
 
 if [ "$LIBACFUTILS" = "**Unknown**" ]; then
 	echo "Please use \"qmake -set LIBACFUTILS <<path>>\" to " \

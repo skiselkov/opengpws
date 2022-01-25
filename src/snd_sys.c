@@ -13,8 +13,10 @@
  * CDDL HEADER END
 */
 /*
- * Copyright 2017 Saso Kiselkov. All rights reserved.
+ * Copyright 2022 Saso Kiselkov. All rights reserved.
  */
+
+#ifndef	NOAUDIO
 
 #include <acfutils/assert.h>
 #include <acfutils/dr.h>
@@ -260,3 +262,5 @@ snd_sys_set_supp(bool_t flag)
 {
 	sound_supp = flag;
 }
+
+#endif	/* !defined(NOAUDIO) */

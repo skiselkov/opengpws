@@ -507,6 +507,9 @@ load_earth_orbit_tex(dem_tile_t *tile, double load_res)
 	char *path;
 	char filename[32];
 
+	if (ABS(tile->lat) > 90 || ABS(tile->lon) > 180)
+		return (B_FALSE);
+
 	snprintf(filename, sizeof (filename), "%+03.0f%+04.0f-nrm.png",
 	    floor(tile->lat / 10.0) * 10, floor(tile->lon / 10.0) * 10);
 	path = mkpathname(get_xpdir(), "Resources", "bitmaps",

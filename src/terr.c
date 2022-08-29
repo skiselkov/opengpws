@@ -13,7 +13,7 @@
  * CDDL HEADER END
 */
 /*
- * Copyright 2017 Saso Kiselkov. All rights reserved.
+ * Copyright 2022 Saso Kiselkov. All rights reserved.
  */
 
 #include <ctype.h>
@@ -98,6 +98,9 @@ typedef struct {
 	GLuint		tex[2];
 	GLuint		pbo;
 
+	glutils_quads_t	quads;
+	vect2_t 	quads_v[4];
+
 	avl_node_t	cache_node;
 } dem_tile_t;
 
@@ -138,6 +141,9 @@ static const egpws_range_t dfl_ranges[] = {
 	{ NAN, NAN }
 };
 static const egpws_range_t *ranges = dfl_ranges;
+
+static fpp_t terr_render_get_fpp_impl(const egpws_render_t *render,
+    bool apply_rot);
 
 static int
 dem_tile_compar(const void *a, const void *b)
@@ -759,6 +765,7 @@ free_dem_tile(dem_tile_t *tile)
 	}
 	if (tile->pbo != 0)
 		glDeleteBuffers(1, &tile->pbo);
+	glutils_destroy_quads(&tile->quads);
 	if (tile->water_mask_surf != NULL)
 		cairo_surface_destroy(tile->water_mask_surf);
 	free(tile->pixels);
@@ -1130,6 +1137,35 @@ update_tiles(void)
 	mutex_exit(&dem_tile_cache_lock);
 }
 
+static double
+render_get_range(const egpws_render_t *render)
+{
+	double range, r;
+
+	ASSERT(render != NULL);
+
+	range = vect2_abs(render->offset);
+	r = vect2_abs(vect2_sub(render->disp_sz, render->offset));
+	range = MAX(r, range);
+	r = vect2_abs(vect2_sub(VECT2(0, render->disp_sz.y), render->offset));
+	range = MAX(r, range);
+	r = vect2_abs(vect2_sub(VECT2(render->disp_sz.x, 0), render->offset));
+	range = MAX(r, range);
+
+	return (range / render->scale);
+}
+
+/*
+ * The maximum diagonal dimension of a 1x1 degree tile on Earth.
+ * The maximum one-side dimension is 40,000 km (Earth's circumference)
+ * divided into 360 pieces (111.111km). Take half of that (55.555 km)
+ * and treat it as two sides of a right-angle triangle. The hypotenuse
+ * is the maximum we could be from the tile's centerpoint coordinate
+ * (half-degree midpoint) while still being "inside" of the tile. Any
+ * further out, and we're definitely outside of it.
+ */
+#define	TILE_MAX_DIAG_SEMI_DIM	78567	/* m */
+
 static void
 draw_tiles(const egpws_render_t *render)
 {
@@ -1139,12 +1175,15 @@ draw_tiles(const egpws_render_t *render)
 	GLfloat hgt_rngs_ft[4 * 2];
 	GLfloat hgt_colors[4 * 4];
 	GLuint prog;
+	double range;
 
 	ASSERT(render != NULL);
-	fpp = terr_render_get_fpp(render);
+	fpp = terr_render_get_fpp_impl(render, false);
+	range = render_get_range(render);
 
 	glm_ortho(0, render->disp_sz.x, 0, render->disp_sz.y, 0, 1, pvm);
 	glm_translate(pvm, (vec3){render->offset.x, render->offset.y, 0});
+	glm_rotate_z(pvm, DEG2RAD(render->rotation), pvm);
 
 	for (int i = 0; i < 4; i++) {
 		const egpws_terr_color_t *color = &conf->terr_colors[i];
@@ -1172,25 +1211,42 @@ draw_tiles(const egpws_render_t *render)
 	mutex_enter(&dem_tile_cache_lock);
 	for (dem_tile_t *tile = avl_first(&dem_tile_cache);
 	    tile != NULL; tile = AVL_NEXT(&dem_tile_cache, tile)) {
-		vect2_t v[4];
-		vect2_t t[4] = {
+		static const vect2_t t[4] = {
 		    VECT2(0, 0), VECT2(0, 1), VECT2(1, 1), VECT2(1, 0)
 		};
-		glutils_quads_t quads;
+		vect2_t v[4];
+		geo_pos2_t tile_ctr;
 
 		if (tile->cur_tex == -1)
 			continue;
-
+		/*
+		 * Check if the tile is outside of display range.
+		 */
+		tile_ctr = GEO_POS2(tile->lat + 0.5, tile->lon + 0.5);
+		if (gc_distance(TO_GEO2(render->position), tile_ctr) >
+		    range + TILE_MAX_DIAG_SEMI_DIM) {
+			continue;
+		}
 		v[0] = geo2fpp(GEO_POS2(tile->lat, tile->lon), &fpp);
 		v[1] = geo2fpp(GEO_POS2(tile->lat + 1, tile->lon), &fpp);
 		v[2] = geo2fpp(GEO_POS2(tile->lat + 1, tile->lon + 1), &fpp);
 		v[3] = geo2fpp(GEO_POS2(tile->lat, tile->lon + 1), &fpp);
-
+		for (int i = 0; i < 4; i++) {
+			v[i].x = round(v[i].x * 2) / 2;
+			v[i].y = round(v[i].y * 2) / 2;
+		}
 		glBindTexture(GL_TEXTURE_2D, tile->tex[tile->cur_tex]);
-
-		glutils_init_2D_quads(&quads, v, t, 4);
-		glutils_draw_quads(&quads, prog);
-		glutils_destroy_quads(&quads);
+		/*
+		 * Only upload new data when the tile has moved.
+		 */
+		if (memcmp(tile->quads_v, v, sizeof (tile->quads_v)) != 0) {
+			memcpy(tile->quads_v, v, sizeof (tile->quads_v));
+			if (!glutils_quads_inited(&tile->quads))
+				glutils_init_2D_quads(&tile->quads, v, t, 4);
+			else
+				glutils_update_2D_quads(&tile->quads, v, t, 4);
+		}
+		glutils_draw_quads(&tile->quads, prog);
 	}
 	mutex_exit(&dem_tile_cache_lock);
 
@@ -1214,8 +1270,8 @@ terr_render(const egpws_render_t *render)
 #endif
 }
 
-fpp_t
-terr_render_get_fpp(const egpws_render_t *render)
+static fpp_t
+terr_render_get_fpp_impl(const egpws_render_t *render, bool apply_rot)
 {
 	fpp_t fpp;
 
@@ -1223,11 +1279,17 @@ terr_render_get_fpp(const egpws_render_t *render)
 	ASSERT(!IS_NULL_GEO_POS2(render->position));
 	ASSERT(isfinite(render->rotation));
 
-	fpp = ortho_fpp_init(TO_GEO2(render->position), render->rotation,
-	    NULL, true);
+	fpp = ortho_fpp_init(TO_GEO2(render->position),
+	    apply_rot ? render->rotation : 0, NULL, true);
 	fpp_set_scale(&fpp, VECT2(render->scale, render->scale));
 
 	return (fpp);
+}
+
+fpp_t
+terr_render_get_fpp(const egpws_render_t *render)
+{
+	return (terr_render_get_fpp_impl(render, true));
 }
 
 static void

@@ -504,7 +504,7 @@ load_earth_orbit_tex(dem_tile_t *tile, double load_res)
 	double tile_width = (EARTH_CIRC / 360) * cos(DEG2RAD(tile->lat));
 	double scale_x, scale_y;
 	unsigned pix_width, pix_height;
-	int png_width, png_height;
+	int png_width, png_height, color_type, bit_depth;
 	double tile_off_lat, tile_off_lon;
 	double tile_off_x, tile_off_y;
 	int16_t *pixels;
@@ -517,7 +517,8 @@ load_earth_orbit_tex(dem_tile_t *tile, double load_res)
 	    floor(tile->lat / 10.0) * 10, floor(tile->lon / 10.0) * 10);
 	path = mkpathname(get_xpdir(), "Resources", "bitmaps",
 	    "Earth Orbit Textures", filename, NULL);
-	png_pixels = png_load_from_file_rgba(path, &png_width, &png_height);
+	png_pixels = png_load_from_file_rgba_auto(path,
+	    &png_width, &png_height, &color_type, &bit_depth);
 	lacf_free(path);
 	if (png_pixels == NULL)
 		return (B_FALSE);

@@ -16,7 +16,8 @@
 # Copyright 2022 Saso Kiselkov. All rights reserved.
 
 OUTPUT_DIR="OpenGPWS"
-case $(uname) in
+OS="$(uname)"
+case "$OS" in
 Darwin)
 	INSTALL="install -m 644"
 	;;
@@ -25,21 +26,53 @@ Darwin)
 	;;
 esac
 
-while getopts "AG" o; do
+NOAUDIO=0
+
+while getopts "AGa:hn" o; do
 	case "${o}" in
 	A)
 		NOAUDIO=1
-		NOAUDIO_FLAG="-A"
+		;;
+	h)
+		cat << EOF
+Usage: $0 -a <libacfutils> [-AGhn]
+    -a <libacfutils> : path to built libacfutils repo
+    -A : disable audio generation entirely
+    -G : include Garmin audio instead of Honeywell audio
+    -h : show this help screen
+    -n : (macOS-only) Codesign & notarize the resulting XPL after build
+     Note: requires that you create a file named user.make in the
+     notarize directory with DEVELOPER_USERNAME and DEVELOPER_PASSWORD
+     set. See notarize/notarize.make for more information.
+EOF
+		exit
 		;;
 	G)
 		GARMIN=1
 		;;
+	a)
+		LIBACFUTILS="$(realpath "$OPTARG")"
+		;;
+	n)
+		if [[ $(uname) != "Darwin" ]]; then
+			echo "Codesigning and notarization can only be done" \
+			    "on macOS" >&2
+			exit 1
+		fi
+		NOTARIZE=1
+		;;
 	esac
 done
 
+if [ -z "$LIBACFUTILS" ]; then
+	echo "Missing mandatory argument -a." \
+	    "Try $0 -h for more information" >&2
+	exit 1
+fi
+
 if ! opusenc -h &> /dev/null ; then
-	echo "Couldn't find \"opusenc\" command. Please install \"opus-tools\"" \
-	    >&2
+	echo "Couldn't find \"opusenc\" command." \
+	    "Please install \"opus-tools\"" >&2
 	exit 1
 fi
 
@@ -48,14 +81,28 @@ set -e
 rm -rf "$OUTPUT_DIR" "$OUTPUT_DIR.zip"
 mkdir -p "$OUTPUT_DIR"
 
-( cd qmake && ./build $NOAUDIO_FLAG ) || exit 1
+if [[ "$OS" = "Darwin" ]]; then
+	NCPUS=$(( $(sysctl -n hw.ncpu) + 1 ))
+	( cd src && cmake . -DLIBACFUTILS="${LIBACFUTILS}" \
+	    -DNOAUDIO=${NOAUDIO} && make -j "$NCPUS" ) || exit 1
+	if [ -n "${NOTARIZE}" ]; then
+		make -f notarize/notarize.make notarize
+	fi
+else
+	NCPUS=$(( $(grep 'processor[[:space:]]\+:' /proc/cpuinfo  | wc -l) + \
+	    1 ))
+	( cd src && rm -f CMakeCache.txt && \
+	    cmake . -DLIBACFUTILS="${LIBACFUTILS}" -DNOAUDIO=${NOAUDIO} && \
+	    make -j "${NCPUS}" ) || exit 1
+	( cd src && rm -f CMakeCache.txt && \
+	    cmake . -DLIBACFUTILS="${LIBACFUTILS}" -DNOAUDIO=${NOAUDIO}  \
+	    -DCMAKE_TOOLCHAIN_FILE=XCompile.cmake \
+	    -DHOST=x86_64-w64-mingw32 && \
+	    make -j "${NCPUS}" ) || exit 1
+fi
 
 if [[ $(uname) = "Linux" ]]; then
-	$INSTALL -- "qmake/output/lin_x64/${OUTPUT_DIR}.xpl" \
-	    "$OUTPUT_DIR/lin_x64/${OUTPUT_DIR}.xpl"
-	$INSTALL -- "qmake/output/win_x64/${OUTPUT_DIR}.xpl" \
-	    "$OUTPUT_DIR/win_x64/${OUTPUT_DIR}.xpl"
-	$INSTALL -- "qmake/output/win_x64/syms.txt" \
+	"$LIBACFUTILS/tools/mksyms" "$OUTPUT_DIR/win_x64/OpenGPWS.xpl" > \
 	    "$OUTPUT_DIR/win_x64/syms.txt"
 else
 	# MacOS "install" is such a pile of trash that it can't create
@@ -66,8 +113,6 @@ else
 	    "$OUTPUT_DIR/data/ra/garmin" \
 	    "$OUTPUT_DIR/data/ra/boeing" \
 	    "$OUTPUT_DIR/opengpws"
-	$INSTALL -- "qmake/output/mac_x64/${OUTPUT_DIR}.xpl" \
-	    "$OUTPUT_DIR/mac_x64/${OUTPUT_DIR}.xpl"
 fi
 
 if [[ "$NOAUDIO" != 1 ]]; then

@@ -4,10 +4,12 @@ Makefile
 CMakeFiles
 bin
 .DS_Store
-qmake/object_script.win.xpl.Debug
-qmake/object_script.win.xpl.Release
-qmake/output/
-qmake/win.xpl_resource.rc
 *.opus
 OpenGPWS.zip
 OpenGPWS
+src/libOpenGPWS.xpl.dll.a
+notarize/AuditInfo.json
+notarize/ExportOptions.plist
+notarize/RequestInfo.plist
+notarize/UploadInfo.plist
+notarize/user.make

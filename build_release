@@ -15,14 +15,20 @@
 #
 # Copyright 2022 Saso Kiselkov. All rights reserved.
 
+function my_realpath() {
+	[[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"
+}
+
 OUTPUT_DIR="OpenGPWS"
 OS="$(uname)"
 case "$OS" in
 Darwin)
 	INSTALL="install -m 644"
+	REALPATH=my_realpath
 	;;
 *)
 	INSTALL="install -D -m 644"
+	REALPATH=realpath
 	;;
 esac
 
@@ -51,7 +57,7 @@ EOF
 		GARMIN=1
 		;;
 	a)
-		LIBACFUTILS="$(realpath "$OPTARG")"
+		LIBACFUTILS="$(${REALPATH} "$OPTARG")"
 		;;
 	n)
 		if [[ $(uname) != "Darwin" ]]; then

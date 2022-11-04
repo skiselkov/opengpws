@@ -75,7 +75,7 @@ endif()
 
 include_directories(opengpws PUBLIC
     "${LIBACFUTILS}/src"
-    "${LIBACFUTILS}/glew/glew-1.13.0-linux-64/install/include"
+    "${GLEW_PREFIX}/include"
     "..")
 
 #compiler flags
@@ -145,8 +145,7 @@ include_directories(opengpws PUBLIC
     "${LIBACFUTILS}/SDK/CHeaders/XPLM"
     "${LIBACFUTILS}/SDK/CHeaders/Widgets"
     "${LIBACFUTILS}/SDK/CHeaders/Wrappers"
-    "${LIBACFUTILS}/OpenAL/include"
-    "${LIBACFUTILS}/cglm/cglm-0.4.1/include"
+    "${OPENAL_PREFIX}/include/AL"
     "${CMAKE_SOURCE_DIR}/../api")
 
 # linking

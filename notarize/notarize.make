@@ -43,7 +43,7 @@ SIGNING_CERTIFICATE := $(shell security find-certificate -Z -c \
     "Developer ID Application:" | grep "SHA-1" | awk 'NF { print $$NF }')
 TEAM_ID := $(shell security find-certificate -c "Developer ID Application:" | \
     grep "alis" | awk 'NF { print $$NF }' | tr -d \(\)\")
-XP_PLUGIN := mac_x64/OpenGPWS.xpl
+XP_PLUGIN := OpenGPWS/mac_x64/OpenGPWS.xpl
 ZIPNAME := $(shell mktemp -u /tmp/bp.XXXXXX).zip
 UPLOAD_INFO_PLIST := $(TOPDIR)/UploadInfo.plist
 REQUEST_INFO_PLIST := $(TOPDIR)/RequestInfo.plist

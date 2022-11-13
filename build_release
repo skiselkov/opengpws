@@ -90,7 +90,8 @@ mkdir -p "$OUTPUT_DIR"
 if [[ "$OS" = "Darwin" ]]; then
 	NCPUS=$(( $(sysctl -n hw.ncpu) + 1 ))
 	( cd src && cmake . -DLIBACFUTILS="${LIBACFUTILS}" \
-	    -DNOAUDIO=${NOAUDIO} && make -j "$NCPUS" ) || exit 1
+	    -DNOAUDIO=${NOAUDIO} -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" && \
+	    make -j "$NCPUS" ) || exit 1
 	if [ -n "${NOTARIZE}" ]; then
 		make -f notarize/notarize.make notarize
 	fi

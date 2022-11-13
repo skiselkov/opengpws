@@ -108,14 +108,12 @@ add_definitions(-DXPLM200=1 -DXPLM210=1 -DGLEW_BUILD=GLEW_STATIC)
 
 if(APPLE)
 	add_definitions(-DAPL=1 -DIBM=0 -DLIN=0)
-	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -arch x86_64 -arch arm64")
 	execute_process(COMMAND ${LIBACFUTILS}/pkg-config-deps mac-64 --cflags
 	    OUTPUT_VARIABLE DEP_CFLAGS)
 	execute_process(COMMAND ${LIBACFUTILS}/pkg-config-deps mac-64 --libs
 	    OUTPUT_VARIABLE LIBACFUTILS_DEP_LDFLAGS)
 	set_target_properties(opengpws PROPERTIES LINK_FLAGS
-	    "${CMAKE_SHARED_LINKER_FLAGS} -fvisibility=hidden -bundle \
-	    -arch x86_64 -arch arm64")
+	    "${CMAKE_SHARED_LINKER_FLAGS} -fvisibility=hidden -bundle")
 elseif(WIN32)
 	add_definitions(-DAPL=0 -DIBM=1 -DLIN=0 -D_WIN32_WINNT=0x0600)
 	execute_process(COMMAND ${LIBACFUTILS}/pkg-config-deps win-64 --cflags

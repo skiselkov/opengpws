@@ -79,7 +79,7 @@ include_directories(opengpws PUBLIC
     "..")
 
 #compiler flags
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Werror --std=c99 \
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Werror --std=c11 \
     -Wno-unused-local-typedefs -Wno-missing-field-initializers \
     -Wno-deprecated")
 if(!APPLE)

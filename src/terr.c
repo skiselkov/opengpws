@@ -1128,6 +1128,7 @@ update_tiles(void)
 			    tile->pix_height, 0, GL_RG, GL_UNSIGNED_BYTE, NULL);
 
 			tile->dirty = B_FALSE;
+			glDeleteSync(tile->in_flight);
 			tile->in_flight = 0;
 			tile->cur_tex = next_tex;
 		}

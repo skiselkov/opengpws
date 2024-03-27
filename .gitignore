@@ -8,8 +8,6 @@ bin
 OpenGPWS.zip
 OpenGPWS
 src/libOpenGPWS.xpl.dll.a
-notarize/AuditInfo.json
-notarize/ExportOptions.plist
-notarize/RequestInfo.plist
-notarize/UploadInfo.plist
-notarize/user.make
+notarize/notarization.json
+notarize/submission.plist
+notarize/verbose.json

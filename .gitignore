@@ -8,6 +8,6 @@ bin
 OpenGPWS.zip
 OpenGPWS
 src/libOpenGPWS.xpl.dll.a
-notarize/notarization.json
+notarize/notarization.plist
 notarize/submission.plist
 notarize/verbose.json

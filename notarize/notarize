@@ -21,10 +21,10 @@
 # the script will find those itself.
 #
 #
-#   % xcrun notarytool store-credentials "notarytool-password"
-#                    --apple-id "<AppleID>"
-#                    --team-id <DeveloperTeamID>
-#                    --password <secret_2FA_password>
+#	% xcrun notarytool store-credentials "notarytool-password"
+#					 --apple-id "<AppleID>"
+#					 --team-id <DeveloperTeamID>
+#					 --password <secret_2FA_password>
 #
 #
 # See https://developer.apple.com/documentation/security/notarizing_macos_software_before_distribution/customizing_the_notarization_workflow
@@ -38,61 +38,61 @@ PLISTBUDDY="/usr/libexec/PlistBuddy"
 BASE_BUNDLE_ID="x-plane"
 
 function sign {
-    TARGET="$1"
-    PLUGIN="$TARGET/mac_x64/$TARGET.xpl"
-    BUNDLE_ID="$BASE_BUNDLE_ID.$TARGET"
-    
-    CERT=$(security find-certificate -Z -c "Developer ID Application:" | \
-        grep "SHA-1" | \
-        awk 'NF { print $NF }')
-    
-    echo "Signing $PLUGIN ($BUNDLE_ID)..."
+	TARGET="$1"
+	PLUGIN="$TARGET/mac_x64/$TARGET.xpl"
+	BUNDLE_ID="$BASE_BUNDLE_ID.$TARGET"
+	
+	CERT=$(security find-certificate -Z -c "Developer ID Application:" | \
+		grep "SHA-1" | \
+		awk 'NF { print $NF }')
+	
+	echo "Signing $PLUGIN ($BUNDLE_ID)..."
 	codesign "$PLUGIN" \
-        --sign "$CERT" \
-        --force \
-        --options runtime \
-        --timestamp \
-        --identifier "$BUNDLE_ID" || exit 1
+		--sign "$CERT" \
+		--force \
+		--options runtime \
+		--timestamp \
+		--identifier "$BUNDLE_ID" || exit 1
 }
 
 function notarize {
-    TARGET="$1"
-    PLUGIN="$TARGET/mac_x64/$TARGET.xpl"
-    SUBMIT_LOG="notarize/submission.plist"
-    RESULT_LOG="notarize/notarization.plist"
-    VERBOSE_LOG="notarize/verbose.json"
-    ZIPFILE="$(mktemp -u /tmp/$TARGET.XXXXXX).zip"
-    
-    echo "Packaging $PLUGIN for notarization..."
-    zip "$ZIPFILE" "$PLUGIN"
-    
-    echo "Submitting notarization request..."
+	TARGET="$1"
+	PLUGIN="$TARGET/mac_x64/$TARGET.xpl"
+	SUBMIT_LOG="notarize/submission.plist"
+	RESULT_LOG="notarize/notarization.plist"
+	VERBOSE_LOG="notarize/verbose.json"
+	ZIPFILE="$(mktemp -u /tmp/$TARGET.XXXXXX).zip"
+	
+	echo "Packaging $PLUGIN for notarization..."
+	zip "$ZIPFILE" "$PLUGIN"
+	
+	echo "Submitting notarization request..."
 	$NOTARYTOOL submit "$ZIPFILE" \
 		--keychain-profile AC_PASSWORD \
-        --output-format plist \
-        --wait --progress > "$SUBMIT_LOG" || exit 1
-    ID=$($PLISTBUDDY -c "Print :id" "$SUBMIT_LOG")
-    
-    # $NOTARYTOOL wait "$ID" \
-    #     --keychain-profile AC_PASSWORD || exit 1
-    $NOTARYTOOL info "$ID" \
-        --keychain-profile AC_PASSWORD \
-        --output-format plist > "$RESULT_LOG" || exit 1
-    
-    STATUS=$($PLISTBUDDY -c "Print :status" "$RESULT_LOG")
-    
-    if [[ "$STATUS" == "Accepted" ]]; then
-        echo "Notarization successful"
-    else
-        echo "Notarization error\nCheck notarize/notarization.plist for more info"
-    fi
-    
-    echo "Fetching verbose log..."
-    $NOTARYTOOL log "$ID" \
-        --keychain-profile AC_PASSWORD \
-        --output-format plist > "$VERBOSE_LOG"
+		--output-format plist \
+		--wait --progress > "$SUBMIT_LOG" || exit 1
+	ID=$($PLISTBUDDY -c "Print :id" "$SUBMIT_LOG")
+	
+	# $NOTARYTOOL wait "$ID" \
+	#	  --keychain-profile AC_PASSWORD || exit 1
+	$NOTARYTOOL info "$ID" \
+		--keychain-profile AC_PASSWORD \
+		--output-format plist > "$RESULT_LOG" || exit 1
+	
+	STATUS=$($PLISTBUDDY -c "Print :status" "$RESULT_LOG")
+	
+	if [[ "$STATUS" == "Accepted" ]]; then
+		echo "Notarization successful"
+	else
+		echo "Notarization error\nCheck notarize/notarization.plist for more info"
+	fi
+	
+	echo "Fetching verbose log..."
+	$NOTARYTOOL log "$ID" \
+		--keychain-profile AC_PASSWORD \
+		--output-format plist > "$VERBOSE_LOG"
 
-    rm "$ZIPFILE"
+	rm "$ZIPFILE"
 }
 
 sign "OpenGPWS" && notarize "OpenGPWS" || exit 1

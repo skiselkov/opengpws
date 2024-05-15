@@ -568,7 +568,7 @@ load_earth_orbit_tex(dem_tile_t *tile, double load_res)
 			int png_y_hi = clamp(ceil(png_y), 0, png_height - 1);
 			double x_fract = png_x - png_x_lo;
 			double y_fract = png_y - png_y_lo;
-			double elev;
+			double raw_val;
 
 			/* If the elev file was used or not. */
 			if (ele_file) {
@@ -583,10 +583,8 @@ load_earth_orbit_tex(dem_tile_t *tile, double load_res)
 					(png_x_lo + png_y_hi * png_width) + 1];
 				uint8_t lr = png_pixels[sizeof(uint32_t) *
 					(png_x_hi + png_y_hi * png_width) + 1];
-				double raw_val = wavg(wavg(ul, ur, x_fract),
+				raw_val = wavg(wavg(ul, ur, x_fract),
 					wavg(ll, lr, x_fract), y_fract);
-				elev = fx_lin(raw_val, 0, EOT_ELEV_MAX,
-					255, EOT_ELEV_MIN);
 			} else {
 				uint8_t ul = png_pixels[sizeof(uint32_t) *
 					(png_x_lo + png_y_lo * png_width) + 3];
@@ -596,12 +594,12 @@ load_earth_orbit_tex(dem_tile_t *tile, double load_res)
 					(png_x_lo + png_y_hi * png_width) + 3];
 				uint8_t lr = png_pixels[sizeof(uint32_t) *
 					(png_x_hi + png_y_hi * png_width) + 3];
-				double raw_val = wavg(wavg(ul, ur, x_fract),
+				raw_val = wavg(wavg(ul, ur, x_fract),
 					wavg(ll, lr, x_fract), y_fract);
-				elev = fx_lin(raw_val, 0, EOT_ELEV_MAX,
-					255, EOT_ELEV_MIN);
 			}
 
+			double elev = fx_lin(raw_val, 0, EOT_ELEV_MAX,
+				255, EOT_ELEV_MIN);
 			pixels[x + (pix_height - y - 1) * pix_width] =
 			    ELEV_WRITE(elev);
 		}

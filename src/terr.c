@@ -512,14 +512,29 @@ load_earth_orbit_tex(dem_tile_t *tile, double load_res)
 	uint8_t *png_pixels;
 	char *path;
 	char filename[32];
+	bool ele_file = true;
 
-	snprintf(filename, sizeof (filename), "%+03.0f%+04.0f-nrm.png",
+	/* Try X-Plane 12's -ele file first. */
+	snprintf(filename, sizeof (filename), "%+03.0f%+04.0f-ele.png",
 	    floor(tile->lat / 10.0) * 10, floor(tile->lon / 10.0) * 10);
 	path = mkpathname(get_xpdir(), "Resources", "bitmaps",
 	    "Earth Orbit Textures", filename, NULL);
 	png_pixels = png_load_from_file_rgba_auto(path,
 	    &png_width, &png_height, &color_type, &bit_depth);
 	lacf_free(path);
+
+	if (png_pixels == NULL) {
+		/* If loading that file didn't work, try the old way. */
+		ele_file = false;
+		snprintf(filename, sizeof(filename), "%+03.0f%+04.0f-nrm.png",
+			floor(tile->lat / 10.0) * 10, floor(tile->lon / 10.0) * 10);
+		path = mkpathname(get_xpdir(), "Resources", "bitmaps",
+			"Earth Orbit Textures", filename, NULL);
+		png_pixels = png_load_from_file_rgba_auto(path,
+			&png_width, &png_height, &color_type, &bit_depth);
+		lacf_free(path);
+	}
+
 	if (png_pixels == NULL)
 		return (B_FALSE);
 	if (png_width < 1024 || png_height < 1024) {
@@ -553,19 +568,38 @@ load_earth_orbit_tex(dem_tile_t *tile, double load_res)
 			int png_y_hi = clamp(ceil(png_y), 0, png_height - 1);
 			double x_fract = png_x - png_x_lo;
 			double y_fract = png_y - png_y_lo;
-			uint8_t ul = png_pixels[sizeof (uint32_t) *
-			    (png_x_lo + png_y_lo * png_width) + 3];
-			uint8_t ur = png_pixels[sizeof (uint32_t) *
-			    (png_x_hi + png_y_lo * png_width) + 3];
-			uint8_t ll = png_pixels[sizeof (uint32_t) *
-			    (png_x_lo + png_y_hi * png_width) + 3];
-			uint8_t lr = png_pixels[sizeof (uint32_t) *
-			    (png_x_hi + png_y_hi * png_width) + 3];
-			double raw_val = wavg(wavg(ul, ur, x_fract),
-			    wavg(ll, lr, x_fract), y_fract);
-			double elev = fx_lin(raw_val, 0, EOT_ELEV_MAX,
-			    255, EOT_ELEV_MIN);
+			double raw_val;
 
+			/* If the elev file was used or not. */
+			if (ele_file) {
+				/* Only need to get any of the channels other 
+				 * than Alpha as all channels scale up the same!
+				*/
+				uint8_t ul = png_pixels[sizeof(uint32_t) *
+					(png_x_lo + png_y_lo * png_width) + 1];
+				uint8_t ur = png_pixels[sizeof(uint32_t) *
+					(png_x_hi + png_y_lo * png_width) + 1];
+				uint8_t ll = png_pixels[sizeof(uint32_t) *
+					(png_x_lo + png_y_hi * png_width) + 1];
+				uint8_t lr = png_pixels[sizeof(uint32_t) *
+					(png_x_hi + png_y_hi * png_width) + 1];
+				raw_val = wavg(wavg(ul, ur, x_fract),
+					wavg(ll, lr, x_fract), y_fract);
+			} else {
+				uint8_t ul = png_pixels[sizeof(uint32_t) *
+					(png_x_lo + png_y_lo * png_width) + 3];
+				uint8_t ur = png_pixels[sizeof(uint32_t) *
+					(png_x_hi + png_y_lo * png_width) + 3];
+				uint8_t ll = png_pixels[sizeof(uint32_t) *
+					(png_x_lo + png_y_hi * png_width) + 3];
+				uint8_t lr = png_pixels[sizeof(uint32_t) *
+					(png_x_hi + png_y_hi * png_width) + 3];
+				raw_val = wavg(wavg(ul, ur, x_fract),
+					wavg(ll, lr, x_fract), y_fract);
+			}
+
+			double elev = fx_lin(raw_val, 0, EOT_ELEV_MAX,
+				255, EOT_ELEV_MIN);
 			pixels[x + (pix_height - y - 1) * pix_width] =
 			    ELEV_WRITE(elev);
 		}

@@ -576,30 +576,30 @@ load_earth_orbit_tex(dem_tile_t *tile, double load_res)
 				 * than Alpha as all channels scale up the same!
 				*/
 				uint8_t ul = png_pixels[sizeof(uint32_t) *
-					(png_x_lo + png_y_lo * png_width) + 1];
+				    (png_x_lo + png_y_lo * png_width) + 1];
 				uint8_t ur = png_pixels[sizeof(uint32_t) *
-					(png_x_hi + png_y_lo * png_width) + 1];
+				    (png_x_hi + png_y_lo * png_width) + 1];
 				uint8_t ll = png_pixels[sizeof(uint32_t) *
-					(png_x_lo + png_y_hi * png_width) + 1];
+				    (png_x_lo + png_y_hi * png_width) + 1];
 				uint8_t lr = png_pixels[sizeof(uint32_t) *
-					(png_x_hi + png_y_hi * png_width) + 1];
+				    (png_x_hi + png_y_hi * png_width) + 1];
 				raw_val = wavg(wavg(ul, ur, x_fract),
-					wavg(ll, lr, x_fract), y_fract);
+				    wavg(ll, lr, x_fract), y_fract);
 			} else {
 				uint8_t ul = png_pixels[sizeof(uint32_t) *
-					(png_x_lo + png_y_lo * png_width) + 3];
+				    (png_x_lo + png_y_lo * png_width) + 3];
 				uint8_t ur = png_pixels[sizeof(uint32_t) *
-					(png_x_hi + png_y_lo * png_width) + 3];
+				    (png_x_hi + png_y_lo * png_width) + 3];
 				uint8_t ll = png_pixels[sizeof(uint32_t) *
-					(png_x_lo + png_y_hi * png_width) + 3];
+				    (png_x_lo + png_y_hi * png_width) + 3];
 				uint8_t lr = png_pixels[sizeof(uint32_t) *
-					(png_x_hi + png_y_hi * png_width) + 3];
+				    (png_x_hi + png_y_hi * png_width) + 3];
 				raw_val = wavg(wavg(ul, ur, x_fract),
-					wavg(ll, lr, x_fract), y_fract);
+				    wavg(ll, lr, x_fract), y_fract);
 			}
 
 			double elev = fx_lin(raw_val, 0, EOT_ELEV_MAX,
-				255, EOT_ELEV_MIN);
+			    255, EOT_ELEV_MIN);
 			pixels[x + (pix_height - y - 1) * pix_width] =
 			    ELEV_WRITE(elev);
 		}

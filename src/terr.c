@@ -509,7 +509,7 @@ load_earth_orbit_tex(dem_tile_t *tile, double load_res)
 	double tile_off_x, tile_off_y;
 	int16_t *pixels;
 	cairo_surface_t *water_mask_surf = NULL;
-	uint8_t *png_pixels;
+	uint8_t *png_pixels = NULL;
 	char *path;
 	char filename[32];
 	bool ele_file = true;
@@ -519,19 +519,23 @@ load_earth_orbit_tex(dem_tile_t *tile, double load_res)
 	    floor(tile->lat / 10.0) * 10, floor(tile->lon / 10.0) * 10);
 	path = mkpathname(get_xpdir(), "Resources", "bitmaps",
 	    "Earth Orbit Textures", filename, NULL);
-	png_pixels = png_load_from_file_rgba_auto(path,
-	    &png_width, &png_height, &color_type, &bit_depth);
+	if (file_exists(path, NULL)) {
+		png_pixels = png_load_from_file_rgba_auto(path,
+		    &png_width, &png_height, &color_type, &bit_depth);
+	}
 	lacf_free(path);
 
 	if (png_pixels == NULL) {
 		/* If loading that file didn't work, try the old way. */
 		ele_file = false;
 		snprintf(filename, sizeof(filename), "%+03.0f%+04.0f-nrm.png",
-			floor(tile->lat / 10.0) * 10, floor(tile->lon / 10.0) * 10);
+		    floor(tile->lat / 10.0) * 10, floor(tile->lon / 10.0) * 10);
 		path = mkpathname(get_xpdir(), "Resources", "bitmaps",
-			"Earth Orbit Textures", filename, NULL);
-		png_pixels = png_load_from_file_rgba_auto(path,
-			&png_width, &png_height, &color_type, &bit_depth);
+		    "Earth Orbit Textures", filename, NULL);
+		if (file_exists(path, NULL)) {
+			png_pixels = png_load_from_file_rgba_auto(path,
+			    &png_width, &png_height, &color_type, &bit_depth);
+		}
 		lacf_free(path);
 	}
 

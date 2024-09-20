@@ -105,7 +105,10 @@ else
 	    cmake . -DLIBACFUTILS="${LIBACFUTILS}" -DNOAUDIO=${NOAUDIO}  \
 	    -DCMAKE_TOOLCHAIN_FILE=XCompile.cmake \
 	    -DHOST=x86_64-w64-mingw32 && \
-	    make -j "${NCPUS}" ) || exit 1
+	    make -j "${NCPUS}" && \
+	    "$LIBACFUTILS/tools/mksyms" \
+	    "../$OUTPUT_DIR/win_x64/$OUTPUT_DIR.xpl" > \
+	    "../$OUTPUT_DIR/win_x64/syms.txt" ) || exit 1
 fi
 
 if [[ $(uname) = "Linux" ]]; then

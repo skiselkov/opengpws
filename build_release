@@ -96,7 +96,7 @@ if [[ "$OS" = "Darwin" ]]; then
 	    -DNOAUDIO=${NOAUDIO} -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" && \
 	    make -j "$NCPUS" ) || exit 1
 	if [ -n "${NOTARIZE}" ]; then
-		make -f notarize/notarize.make notarize
+		notarize/notarize
 	fi
 else
 	NCPUS=$(( $(grep 'processor[[:space:]]\+:' /proc/cpuinfo  | wc -l) + \

@@ -1,0 +1,98 @@
+#!/bin/sh
+#
+# CDDL HEADER START
+#
+# This file and its contents are supplied under the terms of the
+# # Common Development and Distribution License ("CDDL"), version 1.0.
+# You may only use this file in accordance with the terms of version
+# 1.0 of the CDDL.
+#
+# A full copy of the text of the CDDL should have accompanied this
+# source.  A copy of the CDDL is also available via the Internet at
+# http://www.illumos.org/license/CDDL.
+#
+# CDDL HEADER END
+#
+# Copyright 2022 Saso Kiselkov. All rights reserved.
+#
+#
+# For this script to work, you'll have to use notarytool on the command line to
+# save your Apple developer credentials to the keychain. Once that's done,
+# the script will find those itself.
+#
+#
+#	% xcrun notarytool store-credentials "notarytool-password"
+#					 --apple-id "<AppleID>"
+#					 --team-id <DeveloperTeamID>
+#					 --password <secret_2FA_password>
+#
+#
+# See https://developer.apple.com/documentation/security/notarizing_macos_software_before_distribution/customizing_the_notarization_workflow
+# for more info
+
+VERB="echo"
+NOTARYTOOL="/usr/bin/xcrun notarytool"
+PLISTBUDDY="/usr/libexec/PlistBuddy"
+
+# This gets concatenated with TARGET to form the full bundle ID
+BASE_BUNDLE_ID="x-plane"
+
+function sign {
+	TARGET="$1"
+	PLUGIN="$TARGET/mac_x64/$TARGET.xpl"
+	BUNDLE_ID="$BASE_BUNDLE_ID.$TARGET"
+	
+	CERT=$(security find-certificate -Z -c "Developer ID Application:" | \
+		grep "SHA-1" | \
+		awk 'NF { print $NF }')
+	
+	echo "Signing $PLUGIN ($BUNDLE_ID)..."
+	codesign "$PLUGIN" \
+		--sign "$CERT" \
+		--force \
+		--options runtime \
+		--timestamp \
+		--identifier "$BUNDLE_ID" || exit 1
+}
+
+function notarize {
+	TARGET="$1"
+	PLUGIN="$TARGET/mac_x64/$TARGET.xpl"
+	SUBMIT_LOG="notarize/submission.plist"
+	RESULT_LOG="notarize/notarization.plist"
+	VERBOSE_LOG="notarize/verbose.json"
+	ZIPFILE="$(mktemp -u /tmp/$TARGET.XXXXXX).zip"
+	
+	echo "Packaging $PLUGIN for notarization..."
+	zip "$ZIPFILE" "$PLUGIN"
+	
+	echo "Submitting notarization request..."
+	$NOTARYTOOL submit "$ZIPFILE" \
+		--keychain-profile AC_PASSWORD \
+		--output-format plist \
+		--wait --progress > "$SUBMIT_LOG" || exit 1
+	ID=$($PLISTBUDDY -c "Print :id" "$SUBMIT_LOG")
+	
+	# $NOTARYTOOL wait "$ID" \
+	#	  --keychain-profile AC_PASSWORD || exit 1
+	$NOTARYTOOL info "$ID" \
+		--keychain-profile AC_PASSWORD \
+		--output-format plist > "$RESULT_LOG" || exit 1
+	
+	STATUS=$($PLISTBUDDY -c "Print :status" "$RESULT_LOG")
+	
+	if [[ "$STATUS" == "Accepted" ]]; then
+		echo "Notarization successful"
+	else
+		echo "Notarization error\nCheck notarize/notarization.plist for more info"
+	fi
+	
+	echo "Fetching verbose log..."
+	$NOTARYTOOL log "$ID" \
+		--keychain-profile AC_PASSWORD \
+		--output-format plist > "$VERBOSE_LOG"
+
+	rm "$ZIPFILE"
+}
+
+sign "OpenGPWS" && notarize "OpenGPWS" || exit 1

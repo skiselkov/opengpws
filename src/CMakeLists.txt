@@ -11,9 +11,9 @@
 #
 # CDDL HEADER END
 
-# Copyright 2022 Saso Kiselkov. All rights reserved.
+# Copyright 2025 Saso Kiselkov. All rights reserved.
 
-cmake_minimum_required(VERSION 3.9)
+cmake_minimum_required(VERSION 3.10)
 
 project(opengpws)
 
